@@ -9,6 +9,8 @@ from alpha_quat.features.registry import FactorRegistry
 
 logger = logging.getLogger(__name__)
 
+BATCH_SIZE = 20  # trading dates per DuckDB query
+
 
 class FeaturePipeline:
     def __init__(self, data_dir, output_dir, engine, writer, metadata):
@@ -53,26 +55,35 @@ class FeaturePipeline:
         lookback = registry.min_lookback()
         if lookback > 0 and not rebuild and not since:
             all_idx = {d: i for i, d in enumerate(open_dates)}
-            min_idx = lookback
-            pending = [d for d in pending if all_idx.get(d, 0) >= min_idx]
+            pending = [d for d in pending if all_idx.get(d, 0) >= lookback]
 
         results = {"success": 0, "failed": 0, "errors": []}
+        total = len(pending)
 
-        for trade_date in pending:
+        for i in range(0, total, BATCH_SIZE):
+            batch = pending[i : i + BATCH_SIZE]
+            logger.info(
+                "Batch %d/%d (%s .. %s)",
+                i // BATCH_SIZE + 1,
+                (total + BATCH_SIZE - 1) // BATCH_SIZE,
+                batch[0],
+                batch[-1],
+            )
             try:
-                df = self.engine.compute(registry, trade_date)
-                path = self.output_dir / f"{trade_date}.parquet"
-                self.writer.merge(df, path)
-                self.metadata.insert(
-                    registry.name,
-                    self._to_iso_date(trade_date),
-                    str(path),
-                    len(df),
-                )
-                results["success"] += 1
+                dfs = self.engine.compute_batch(registry, batch)
+                for trade_date, df in dfs.items():
+                    path = self.output_dir / f"{trade_date}.parquet"
+                    self.writer.merge(df, path)
+                    self.metadata.insert(
+                        registry.name,
+                        self._to_iso_date(trade_date),
+                        str(path),
+                        len(df),
+                    )
+                    results["success"] += 1
             except Exception as e:
-                logger.error("Failed %s: %s", trade_date, e)
-                results["failed"] += 1
-                results["errors"].append({trade_date: str(e)})
+                logger.error("Batch failed: %s", e)
+                results["failed"] += len(batch)
+                results["errors"].append(str(e))
 
         return results

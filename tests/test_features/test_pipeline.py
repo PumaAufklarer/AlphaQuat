@@ -10,14 +10,17 @@ from alpha_quat.data.metadata import MetadataManager
 
 
 class FakeEngine:
-    def compute(self, registry, trade_date):
-        return pd.DataFrame(
-            {
-                "ts_code": [f"{trade_date}_A", f"{trade_date}_B"],
-                "trade_date": [trade_date, trade_date],
-                "f_001": [1.0, 2.0],
-            }
-        )
+    def compute_batch(self, registry, trade_dates):
+        return {
+            d: pd.DataFrame(
+                {
+                    "ts_code": [f"{d}_A", f"{d}_B"],
+                    "trade_date": [d, d],
+                    "f_001": [1.0, 2.0],
+                }
+            )
+            for d in trade_dates
+        }
 
 
 class TestFeaturePipeline:
@@ -120,20 +123,8 @@ class TestFeaturePipeline:
         self.make_trade_cal(tmp_path, ["20240102", "20240103", "20240104"])
 
         class FailingEngine:
-            def __init__(self):
-                self.calls = 0
-
-            def compute(self, registry, trade_date):
-                self.calls += 1
-                if trade_date == "20240103":
-                    raise RuntimeError("simulated failure")
-                return pd.DataFrame(
-                    {
-                        "ts_code": ["A"],
-                        "trade_date": [trade_date],
-                        "f_001": [1.0],
-                    }
-                )
+            def compute_batch(self, registry, trade_dates):
+                raise RuntimeError("simulated failure")
 
         engine = FailingEngine()
         writer = ParquetWriter()
@@ -151,10 +142,9 @@ class TestFeaturePipeline:
         )
         result = pipeline.run(reg)
 
-        assert result["success"] == 2
-        assert result["failed"] == 1
+        assert result["success"] == 0
+        assert result["failed"] == 3
         assert len(result["errors"]) == 1
-        assert "20240103" in str(result["errors"][0])
 
     def test_missing_trade_cal_returns_early(self, tmp_path):
         features_dir = tmp_path / "features"
