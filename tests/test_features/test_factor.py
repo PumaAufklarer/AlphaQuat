@@ -69,9 +69,24 @@ class TestCompile:
         result = compile("RANK(f_001)")
         assert "RANK() OVER (PARTITION BY trade_date ORDER BY f_001)" in result
 
+    def test_rank_with_compound_argument(self):
+        result = compile("RANK(REF($close, 1) / $close - 1)")
+        assert "RANK() OVER (PARTITION BY trade_date ORDER BY" in result
+        assert "LAG(close, 1) OVER w_time / close - 1" in result
+
+    def test_rank_with_nested_parens(self):
+        result = compile("RANK(CORR($close, $volume, 10))")
+        assert "RANK() OVER (PARTITION BY trade_date ORDER BY" in result
+        assert "CORR(close, volume) OVER" in result
+
     def test_quantile(self):
         result = compile("QUANTILE(f_001, 10)")
         assert "NTILE(10) OVER (PARTITION BY trade_date ORDER BY f_001)" in result
+
+    def test_quantile_with_compound_argument(self):
+        result = compile("QUANTILE(MEAN($close, 5) / $close, 10)")
+        assert "NTILE(10) OVER (PARTITION BY trade_date ORDER BY" in result
+        assert "AVG(close) OVER" in result
 
     def test_vwap(self):
         result = compile("$vwap")
