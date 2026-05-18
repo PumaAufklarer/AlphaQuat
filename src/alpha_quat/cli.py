@@ -74,11 +74,9 @@ def main():
         data_dir=config.data_dir, fetcher=fetcher, metadata=metadata, writer=writer
     )
 
-    names = (
-        list(ALL_SOURCES.keys()) if "all" in args.sources else args.sources
-    )
+    names = list(ALL_SOURCES.keys()) if "all" in args.sources else args.sources
     sources = [ALL_SOURCES[name]() for name in names]
-    result = pipeline.run(sources)
+    pipeline.run(sources)
 
     # Print summary after run
     print()
