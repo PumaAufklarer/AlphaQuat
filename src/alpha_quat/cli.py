@@ -10,14 +10,14 @@ from alpha_quat.data.pipeline import Pipeline
 from alpha_quat.data.writer import ParquetWriter
 from alpha_quat.data.sources.stock_basic import StockBasicSource
 from alpha_quat.data.sources.trade_cal import TradeCalSource
-from alpha_quat.data.sources.stk_st import StkStSource
+from alpha_quat.data.sources.stock_st import StockStSource
 from alpha_quat.data.sources.daily import DailySource
 from alpha_quat.data.sources.daily_basic import DailyBasicSource
 
 ALL_SOURCES = {
     "stock_basic": StockBasicSource,
     "trade_cal": TradeCalSource,
-    "stk_st": StkStSource,
+    "stock_st": StockStSource,
     "daily": DailySource,
     "daily_basic": DailyBasicSource,
 }
