@@ -14,3 +14,12 @@ class ParquetWriter:
         base_dir.mkdir(parents=True, exist_ok=True)
         file_path = base_dir / f"{trade_date}.parquet"
         df.to_parquet(file_path, index=False)
+
+    def merge(self, df: pd.DataFrame, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            existing = pd.read_parquet(path)
+            merged = existing.merge(df, on="ts_code", how="outer")
+            merged.to_parquet(path, index=False)
+        else:
+            df.to_parquet(path, index=False)

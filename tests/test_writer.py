@@ -47,3 +47,45 @@ def test_write_creates_parent_directory(tmp_path):
     writer.write(df, base_dir, trade_date="2026_05_18")
     expected = base_dir / "2026_05_18.parquet"
     assert expected.exists()
+
+
+class TestMerge:
+    def test_merge_writes_new_file(self, tmp_path):
+        writer = ParquetWriter()
+        df = pd.DataFrame({"ts_code": ["A", "B"], "f_001": [1.0, 2.0]})
+        path = tmp_path / "output.parquet"
+        writer.merge(df, path)
+        assert path.exists()
+        result = pd.read_parquet(path)
+        assert list(result.columns) == ["ts_code", "f_001"]
+        assert len(result) == 2
+
+    def test_merge_joins_with_existing_file(self, tmp_path):
+        writer = ParquetWriter()
+        path = tmp_path / "output.parquet"
+
+        existing = pd.DataFrame({"ts_code": ["A", "B"], "f_001": [1.0, 2.0]})
+        existing.to_parquet(path, index=False)
+
+        new = pd.DataFrame({"ts_code": ["A", "B"], "f_010": [3.0, 4.0]})
+        writer.merge(new, path)
+
+        result = pd.read_parquet(path)
+        assert "f_001" in result.columns
+        assert "f_010" in result.columns
+        assert list(result["f_001"]) == [1.0, 2.0]
+        assert list(result["f_010"]) == [3.0, 4.0]
+
+    def test_merge_preserves_ts_code_mismatch(self, tmp_path):
+        writer = ParquetWriter()
+        path = tmp_path / "output.parquet"
+
+        existing = pd.DataFrame({"ts_code": ["A", "B", "C"], "f_001": [1.0, 2.0, 3.0]})
+        existing.to_parquet(path, index=False)
+
+        new = pd.DataFrame({"ts_code": ["B", "C", "D"], "f_010": [4.0, 5.0, 6.0]})
+        writer.merge(new, path)
+
+        result = pd.read_parquet(path)
+        assert len(result) == 4  # A, B, C, D
+        assert set(result["ts_code"]) == {"A", "B", "C", "D"}
