@@ -219,6 +219,41 @@ def test_pipeline_incremental_start_date_filters_early_dates(tmp_path):
     assert fetcher.query_log[1][1]["trade_date"] == "20160104"
 
 
+def test_pipeline_incremental_excludes_future_dates(tmp_path):
+    data_dir = tmp_path / "data"
+    db_path = str(tmp_path / "registry.db")
+
+    # trade_cal with past + future dates. Past dates are before today (2026-05-18).
+    trade_cal_path = data_dir / "trade_cal.parquet"
+    trade_cal_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "cal_date": ["20260112", "20260518", "20261201", "20261231"],
+            "is_open": [1, 1, 1, 1],
+        }
+    ).to_parquet(trade_cal_path)
+
+    fetcher = FakeFetcher(
+        calls=[
+            pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.0]}),
+            pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.5]}),
+        ]
+    )
+    metadata = MetadataManager(db_path)
+    writer = ParquetWriter()
+    pipeline = Pipeline(
+        data_dir=data_dir, fetcher=fetcher, metadata=metadata, writer=writer
+    )
+
+    results = pipeline.run_incremental_source(DailySource())
+
+    # 20261201 and 20261231 are in the future → excluded
+    assert results["success"] == 2
+    assert len(fetcher.query_log) == 2
+    assert fetcher.query_log[0][1]["trade_date"] == "20260112"
+    assert fetcher.query_log[1][1]["trade_date"] == "20260518"
+
+
 def test_pipeline_run_all(tmp_path):
     data_dir = tmp_path / "data"
     db_path = str(tmp_path / "registry.db")

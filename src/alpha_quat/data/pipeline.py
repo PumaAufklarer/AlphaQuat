@@ -1,6 +1,7 @@
 """Pipeline that orchestrates data fetching, writing, and metadata tracking."""
 
 import logging
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -84,6 +85,10 @@ class Pipeline:
             pending = [d for d in open_dates if d >= source.start_date]
         else:
             pending = open_dates
+
+        # Never pull future dates
+        today_str = date.today().strftime("%Y%m%d")
+        pending = [d for d in pending if d <= today_str]
 
         success, failed = 0, 0
         errors = []
