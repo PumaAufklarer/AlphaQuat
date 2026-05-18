@@ -14,6 +14,12 @@ dependencies = [
     "tushare>=1.4.29",
 ]
 
+[project.scripts]
+alpha-quat = "alpha_quat.cli:main"
+
+[tool.uv]
+package = true
+
 [dependency-groups]
 dev = [
     "pytest-cov>=7.1.0",
