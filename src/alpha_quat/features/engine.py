@@ -6,7 +6,11 @@ import duckdb
 import pandas as pd
 
 from alpha_quat.features.registry import FactorRegistry
-from alpha_quat.features.factor import compile
+from alpha_quat.features.factor import (
+    _unwrap_quantile,
+    _unwrap_rank,
+    compile,
+)
 
 
 class FeatureEngine:
@@ -26,6 +30,45 @@ class FeatureEngine:
         prev = "raw"
 
         for f in factors:
+            inner = _unwrap_rank(f.expression)
+            if inner is not None:
+                compiled_inner = compile(inner)
+                inner_name = f"__{f.name}_inner"
+                sql += f""",
+cte_{inner_name} AS (
+  SELECT *, {compiled_inner} AS {inner_name}
+  FROM {prev}
+  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)
+)"""
+                prev = f"cte_{inner_name}"
+                sql += f""",
+cte_{f.name} AS (
+  SELECT *, RANK() OVER (PARTITION BY trade_date ORDER BY {inner_name}) AS {f.name}
+  FROM {prev}
+)"""
+                prev = f"cte_{f.name}"
+                continue
+
+            quantile = _unwrap_quantile(f.expression)
+            if quantile is not None:
+                inner_expr, n = quantile
+                compiled_inner = compile(inner_expr)
+                inner_name = f"__{f.name}_inner"
+                sql += f""",
+cte_{inner_name} AS (
+  SELECT *, {compiled_inner} AS {inner_name}
+  FROM {prev}
+  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)
+)"""
+                prev = f"cte_{inner_name}"
+                sql += f""",
+cte_{f.name} AS (
+  SELECT *, NTILE({n}) OVER (PARTITION BY trade_date ORDER BY {inner_name}) AS {f.name}
+  FROM {prev}
+)"""
+                prev = f"cte_{f.name}"
+                continue
+
             compiled = compile(f.expression)
             sql += f""",
 cte_{f.name} AS (

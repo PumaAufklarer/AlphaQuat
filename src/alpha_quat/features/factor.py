@@ -21,6 +21,49 @@ class Factor:
         return sorted(refs | factor_refs)
 
 
+def _find_matching_paren(text: str, open_idx: int) -> int:
+    """Return index of closing paren matching the opening paren at open_idx."""
+    depth = 0
+    for i in range(open_idx, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _unwrap_rank(expression: str) -> str | None:
+    """If expression is RANK(...), return the inner expression. Otherwise None."""
+    if not expression.startswith("RANK("):
+        return None
+    end = _find_matching_paren(expression, 4)  # '(' is at index 4
+    if end == -1:
+        return None
+    return expression[5:end]  # content between RANK( and )
+
+
+def _unwrap_quantile(expression: str) -> tuple[str, str] | None:
+    """If expression is QUANTILE(...), return (inner_expr, N). Otherwise None."""
+    if not expression.startswith("QUANTILE("):
+        return None
+    end = _find_matching_paren(expression, 8)  # '(' is at index 8
+    if end == -1:
+        return None
+    content = expression[9:end]  # content between QUANTILE( and )
+    # Find the last comma at depth 0 (splits inner_expr, N)
+    depth = 0
+    for i in range(len(content) - 1, -1, -1):
+        if content[i] == ")":
+            depth += 1
+        elif content[i] == "(":
+            depth -= 1
+        elif content[i] == "," and depth == 0:
+            return content[:i].strip(), content[i + 1 :].strip()
+    return None
+
+
 def compile(expression: str) -> str:
     """Compile DSL expression to DuckDB SQL via regex substitution."""
     expr = expression

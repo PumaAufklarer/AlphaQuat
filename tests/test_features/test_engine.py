@@ -161,3 +161,89 @@ class TestFeatureEngine:
 
         assert len(result) == 2
         assert "total_mv" not in result.columns  # raw columns filtered out
+
+    def test_compute_compound_rank(self, tmp_path):
+        """RANK(REF(...)) should split into two CTEs—no nested window functions."""
+        daily_data = []
+        for stock in ["000001.SZ"]:
+            for i, date in enumerate(
+                [
+                    "20240102",
+                    "20240103",
+                    "20240104",
+                    "20240105",
+                    "20240108",
+                    "20240109",
+                ]
+            ):
+                daily_data.append(
+                    {
+                        "ts_code": stock,
+                        "trade_date": date,
+                        "open": 10.0,
+                        "high": 11.0,
+                        "low": 9.0,
+                        "close": 10.0 + i,
+                        "vol": 1000000.0,
+                        "amount": 10000000.0,
+                    }
+                )
+        make_daily_parquet(tmp_path, daily_data)
+        make_daily_basic_parquet(tmp_path, [])
+
+        reg = FactorRegistry(name="test")
+        reg.register(
+            Factor(
+                name="f_rank",
+                expression="RANK(REF($close, 1) / $close - 1)",
+                category="rank",
+            )
+        )
+
+        engine = FeatureEngine(data_dir=tmp_path)
+        result = engine.compute(reg, trade_date="20240109")
+        assert "f_rank" in result.columns
+        assert len(result) == 1
+
+    def test_compute_compound_quantile(self, tmp_path):
+        """QUANTILE(MEAN(...)) should split into two CTEs."""
+        daily_data = []
+        for stock in ["000001.SZ", "000002.SZ"]:
+            for i, date in enumerate(
+                [
+                    "20240102",
+                    "20240103",
+                    "20240104",
+                    "20240105",
+                    "20240108",
+                    "20240109",
+                ]
+            ):
+                daily_data.append(
+                    {
+                        "ts_code": stock,
+                        "trade_date": date,
+                        "open": 10.0,
+                        "high": 11.0,
+                        "low": 9.0,
+                        "close": 10.0 + i,
+                        "vol": 1000000.0,
+                        "amount": 10000000.0,
+                    }
+                )
+        make_daily_parquet(tmp_path, daily_data)
+        make_daily_basic_parquet(tmp_path, [])
+
+        reg = FactorRegistry(name="test")
+        reg.register(
+            Factor(
+                name="f_q",
+                expression="QUANTILE(MEAN($close, 5) / $close, 5)",
+                category="quantile",
+            )
+        )
+
+        engine = FeatureEngine(data_dir=tmp_path)
+        result = engine.compute(reg, trade_date="20240109")
+        assert "f_q" in result.columns
+        assert len(result) == 2
