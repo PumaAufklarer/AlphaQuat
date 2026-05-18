@@ -80,6 +80,8 @@ class Pipeline:
         if last_date:
             last_str = last_date.strftime("%Y%m%d")
             pending = [d for d in open_dates if d > last_str]
+        elif source.start_date:
+            pending = [d for d in open_dates if d >= source.start_date]
         else:
             pending = open_dates
 

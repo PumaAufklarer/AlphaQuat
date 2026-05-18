@@ -9,6 +9,7 @@ class DataSource(ABC):
     api_name: str
     partition_by: Literal["none", "date"]
     fields: str
+    start_date: str | None = None
 
     @abstractmethod
     def get_params(self, trade_date: str | None = None) -> dict: ...

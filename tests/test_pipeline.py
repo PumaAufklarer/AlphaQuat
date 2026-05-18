@@ -8,6 +8,7 @@ from alpha_quat.data.writer import ParquetWriter
 from alpha_quat.data.sources.stock_basic import StockBasicSource
 from alpha_quat.data.sources.daily import DailySource
 from alpha_quat.data.sources.trade_cal import TradeCalSource
+from alpha_quat.data.sources.stock_st import StockStSource
 
 
 class FakeFetcher:
@@ -181,6 +182,41 @@ def test_pipeline_error_handling_continues_after_failure(tmp_path):
     assert results["failed"] == 1
     assert len(results["errors"]) == 1
     assert "20260113" in results["errors"][0]
+
+
+def test_pipeline_incremental_start_date_filters_early_dates(tmp_path):
+    data_dir = tmp_path / "data"
+    db_path = str(tmp_path / "registry.db")
+
+    trade_cal_path = data_dir / "trade_cal.parquet"
+    trade_cal_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "cal_date": ["19900101", "19900102", "19900103", "20160102", "20160104"],
+            "is_open": [1, 1, 1, 1, 1],
+        }
+    ).to_parquet(trade_cal_path)
+
+    fetcher = FakeFetcher(
+        calls=[
+            pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.0]}),
+            pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.5]}),
+        ]
+    )
+    metadata = MetadataManager(db_path)
+    writer = ParquetWriter()
+    pipeline = Pipeline(
+        data_dir=data_dir, fetcher=fetcher, metadata=metadata, writer=writer
+    )
+
+    results = pipeline.run_incremental_source(StockStSource())
+
+    assert results["success"] == 2
+    assert results["failed"] == 0
+    # Only 2016+ dates should be fetched
+    assert len(fetcher.query_log) == 2
+    assert fetcher.query_log[0][1]["trade_date"] == "20160102"
+    assert fetcher.query_log[1][1]["trade_date"] == "20160104"
 
 
 def test_pipeline_run_all(tmp_path):

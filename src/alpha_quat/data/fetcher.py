@@ -13,7 +13,7 @@ class Fetcher:
     def __init__(
         self,
         token: str,
-        max_retries: int = 3,
+        max_retries: int = 12,
         retry_delay: float = 5.0,
     ):
         if max_retries < 1:
