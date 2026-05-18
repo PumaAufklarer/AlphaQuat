@@ -86,3 +86,8 @@ def test_fetcher_stock_basic_query(monkeypatch):
     assert fake.last_api == "stock_basic"
     assert fake.last_params["list_status"] == "L"
     assert result.iloc[0]["ts_code"] == "000001.SZ"
+
+
+def test_fetcher_raises_value_error_for_zero_max_retries():
+    with pytest.raises(ValueError, match="max_retries"):
+        Fetcher(token="dummy", max_retries=0)
