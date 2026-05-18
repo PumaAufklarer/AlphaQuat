@@ -1,5 +1,7 @@
 """DuckDB metadata manager for data registry."""
 
+import datetime
+
 import duckdb
 
 
@@ -9,10 +11,12 @@ class MetadataManager:
         self._init_table()
 
     def _init_table(self):
+        self.conn.execute("CREATE SEQUENCE IF NOT EXISTS data_registry_id_seq")
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS data_registry (
+                id          INTEGER PRIMARY KEY DEFAULT nextval('data_registry_id_seq'),
                 api_name    VARCHAR NOT NULL,
-                trade_date  VARCHAR,
+                trade_date  DATE,
                 file_path   VARCHAR NOT NULL,
                 row_count   INTEGER NOT NULL,
                 pull_time   TIMESTAMP DEFAULT now(),
@@ -32,23 +36,18 @@ class MetadataManager:
                 "DELETE FROM data_registry WHERE api_name = ? AND trade_date IS NULL",
                 [api_name],
             )
-            self.conn.execute(
-                "INSERT INTO data_registry (api_name, trade_date, file_path, row_count) "
-                "VALUES (?, NULL, ?, ?)",
-                [api_name, file_path, row_count],
-            )
-        else:
-            self.conn.execute(
-                "INSERT INTO data_registry (api_name, trade_date, file_path, row_count) "
-                "VALUES (?, ?, ?, ?) "
-                "ON CONFLICT (api_name, trade_date) DO UPDATE SET "
-                "file_path = EXCLUDED.file_path, "
-                "row_count = EXCLUDED.row_count, "
-                "pull_time = now()",
-                [api_name, trade_date, file_path, row_count],
-            )
+        self.conn.execute(
+            "INSERT INTO data_registry "
+            "(api_name, trade_date, file_path, row_count) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (api_name, trade_date) DO UPDATE SET "
+            "file_path = EXCLUDED.file_path, "
+            "row_count = EXCLUDED.row_count, "
+            "pull_time = now()",
+            [api_name, trade_date, file_path, row_count],
+        )
 
-    def get_last_date(self, api_name: str) -> str | None:
+    def get_last_date(self, api_name: str) -> datetime.date | None:
         result = self.conn.execute(
             "SELECT MAX(trade_date) FROM data_registry WHERE api_name = ?",
             [api_name],

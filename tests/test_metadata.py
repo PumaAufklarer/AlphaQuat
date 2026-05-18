@@ -1,5 +1,7 @@
 """Tests for metadata manager module."""
 
+import datetime
+
 from alpha_quat.data.metadata import MetadataManager
 
 
@@ -25,7 +27,12 @@ def test_insert_single_record(tmp_path):
         "SELECT api_name, trade_date, file_path, row_count FROM data_registry"
     ).fetchall()
     assert len(result) == 1
-    assert result[0] == ("daily", "2026-05-18", "data/daily/2026_05_18.parquet", 100)
+    assert result[0] == (
+        "daily",
+        datetime.date(2026, 5, 18),
+        "data/daily/2026_05_18.parquet",
+        100,
+    )
 
 
 def test_upsert_overwrites_existing(tmp_path):
@@ -57,7 +64,7 @@ def test_get_last_date_returns_max_date(tmp_path):
     mgr.insert("daily", "2026-05-15", "data/daily/2026_05_15.parquet", 60)
     mgr.insert("daily", "2026-05-12", "data/daily/2026_05_12.parquet", 55)
 
-    assert mgr.get_last_date("daily") == "2026-05-15"
+    assert mgr.get_last_date("daily") == datetime.date(2026, 5, 15)
 
 
 def test_summary_returns_grouped_counts(tmp_path):
@@ -71,5 +78,5 @@ def test_summary_returns_grouped_counts(tmp_path):
     result = mgr.summary()
 
     rows = {r[0]: (r[1], r[2]) for r in result}
-    assert rows["daily"] == (2, "2026-05-11")
-    assert rows["stk_st"] == (1, "2026-05-10")
+    assert rows["daily"] == (2, datetime.date(2026, 5, 11))
+    assert rows["stk_st"] == (1, datetime.date(2026, 5, 10))
