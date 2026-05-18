@@ -50,7 +50,9 @@ class TestFactorRegistry:
         f1 = Factor(name="f_001", expression="REF($close, 5)", category="momentum")
         f2 = Factor(name="f_002", expression="MEAN($volume, 20)", category="volume")
         f3 = Factor(name="f_003", expression="STD($close, 10)", category="volatility")
-        f4 = Factor(name="f_004", expression="CORR($close, $volume, 15)", category="correlation")
+        f4 = Factor(
+            name="f_004", expression="CORR($close, $volume, 15)", category="correlation"
+        )
         reg.register(f1)
         reg.register(f2)
         reg.register(f3)

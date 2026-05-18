@@ -28,9 +28,7 @@ ALL_FEATURE_SETS = {
 
 
 def _build_fetch_parser(subparsers):
-    parser = subparsers.add_parser(
-        "fetch", help="Fetch raw data from tushare"
-    )
+    parser = subparsers.add_parser("fetch", help="Fetch raw data from tushare")
     parser.add_argument(
         "-s",
         "--sources",
@@ -54,12 +52,12 @@ def _build_feature_parser(subparsers):
         help="Factor set to compute (default: alpha158)",
     )
     parser.add_argument(
-        "--rebuild", action="store_true",
-        help="Delete all computed factors and recompute from scratch"
+        "--rebuild",
+        action="store_true",
+        help="Delete all computed factors and recompute from scratch",
     )
     parser.add_argument(
-        "--since",
-        help="Recompute factors from this date (YYYYMMDD) onward"
+        "--since", help="Recompute factors from this date (YYYYMMDD) onward"
     )
     return parser
 

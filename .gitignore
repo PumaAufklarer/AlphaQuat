@@ -12,5 +12,8 @@ wheels/
 # Project config (contains secrets)
 config.yaml
 
-# Data files (root-level only)
+# Data files and coverage (root-level only)
 /data/
+/.coverage
+
+.superpowers/

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": true,
+  "formatter": {
+    "ruff": {
+      "command": "uv run ruff format $FILE",
+      "extensions": [
+        ".py"
+      ]
+    }
+  },
+  "command": {
+    "test": {
+      "template": "uv run pytest --cov=src",
+      "description": "运行项目核心测试集并输出覆盖率",
+      "agent": "build"
+    },
+    "lint": {
+      "template": "ruff check --fix $FILE",
+      "description": "自动修复当前文件的代码规范问题",
+      "agent": "build"
+    }
+  }
+}

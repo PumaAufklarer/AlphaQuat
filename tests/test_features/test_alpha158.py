@@ -1,5 +1,4 @@
 import pytest
-from alpha_quat.features.registry import FactorRegistry
 from alpha_quat.features.alphasets.alpha158 import build_alpha158
 
 
@@ -11,6 +10,7 @@ class TestAlpha158:
 
     def test_all_factors_compile(self):
         from alpha_quat.features.factor import compile
+
         reg = build_alpha158()
         for name, factor in reg.factors.items():
             try:
@@ -27,15 +27,17 @@ class TestAlpha158:
     def test_all_deps_exist(self):
         reg = build_alpha158()
         factor_names = set(reg.factors.keys())
-        raw_fields = {
-            "$open", "$high", "$low", "$close", "$volume", "$amount", "$vwap"
-        }
+        raw_fields = {"$open", "$high", "$low", "$close", "$volume", "$amount", "$vwap"}
         for factor in reg.factors.values():
             for dep in factor.depends_on:
                 if dep.startswith("$"):
-                    assert dep in raw_fields, f"{factor.name} depends on unknown raw field {dep}"
+                    assert dep in raw_fields, (
+                        f"{factor.name} depends on unknown raw field {dep}"
+                    )
                 else:
-                    assert dep in factor_names, f"{factor.name} depends on unknown factor {dep}"
+                    assert dep in factor_names, (
+                        f"{factor.name} depends on unknown factor {dep}"
+                    )
 
     def test_min_lookback_consistent(self):
         reg = build_alpha158()
