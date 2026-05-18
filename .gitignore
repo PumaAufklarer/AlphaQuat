@@ -12,5 +12,5 @@ wheels/
 # Project config (contains secrets)
 config.yaml
 
-# Data files
-data/
+# Data files (root-level only)
+/data/
