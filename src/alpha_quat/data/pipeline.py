@@ -23,15 +23,29 @@ class Pipeline:
         self.metadata = metadata
         self.writer = writer
 
-    def run(self, sources: list[DataSource]):
+    def run(self, sources: list[DataSource]) -> dict:
+        results: dict = {
+            "full": {"success": 0, "failed": 0},
+            "incremental": {"success": 0, "failed": 0},
+        }
         for source in sources:
             if source.partition_by == "none":
-                self.run_full_source(source)
+                try:
+                    self.run_full_source(source)
+                    results["full"]["success"] += 1
+                except Exception as e:
+                    results["full"]["failed"] += 1
+                    logger.error(f"[{source.api_name}] full source failed: {e}")
             else:
                 result = self.run_incremental_source(source)
+                if result.get("message"):
+                    logger.warning(result["message"])
+                results["incremental"]["success"] += result.get("success", 0)
+                results["incremental"]["failed"] += result.get("failed", 0)
                 if result.get("errors"):
                     for err in result["errors"]:
                         logger.error(err)
+        return results
 
     def run_full_source(self, source: DataSource):
         params = source.get_params()

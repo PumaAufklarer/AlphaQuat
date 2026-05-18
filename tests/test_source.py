@@ -9,6 +9,7 @@ class FakeFullSource(DataSource):
     api_name = "full_test"
     partition_by = "none"
     fields = "ts_code,name"
+
     def get_params(self, trade_date=None):
         return {"list_status": "L"}
 
@@ -17,7 +18,8 @@ class FakeDateSource(DataSource):
     api_name = "date_test"
     partition_by = "date"
     fields = "ts_code,close"
-    def get_params(self, trade_date):
+
+    def get_params(self, trade_date=None):
         return {"trade_date": trade_date}
 
 

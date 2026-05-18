@@ -1,5 +1,7 @@
 """Tushare daily_basic API data source."""
+
 from alpha_quat.data.source import DataSource
+
 
 class DailyBasicSource(DataSource):
     api_name = "daily_basic"

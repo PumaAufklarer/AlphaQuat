@@ -1,6 +1,5 @@
 """Tests for Pipeline module."""
 
-
 import pandas as pd
 
 from alpha_quat.data.pipeline import Pipeline
@@ -8,6 +7,7 @@ from alpha_quat.data.metadata import MetadataManager
 from alpha_quat.data.writer import ParquetWriter
 from alpha_quat.data.sources.stock_basic import StockBasicSource
 from alpha_quat.data.sources.daily import DailySource
+from alpha_quat.data.sources.trade_cal import TradeCalSource
 
 
 class FakeFetcher:
@@ -26,7 +26,7 @@ class FakeFetcher:
         return df
 
 
-def test_pipeline_runs_full_source(tmp_path, monkeypatch):
+def test_pipeline_runs_full_source(tmp_path):
     data_dir = tmp_path / "data"
     db_path = str(tmp_path / "registry.db")
 
@@ -50,7 +50,7 @@ def test_pipeline_runs_full_source(tmp_path, monkeypatch):
     assert result.iloc[0]["ts_code"] == "000001.SZ"
 
 
-def test_pipeline_run_incremental_source_no_prior_data(tmp_path, monkeypatch):
+def test_pipeline_run_incremental_source_no_prior_data(tmp_path):
     data_dir = tmp_path / "data"
     db_path = str(tmp_path / "registry.db")
 
@@ -140,6 +140,7 @@ def test_pipeline_incremental_skips_when_trade_cal_missing(tmp_path):
     assert results["success"] == 0
     assert results["failed"] == 0
     assert results["message"] == "trade_cal.parquet not found"
+    assert "errors" in results
 
 
 def test_pipeline_error_handling_continues_after_failure(tmp_path):
@@ -180,3 +181,36 @@ def test_pipeline_error_handling_continues_after_failure(tmp_path):
     assert results["failed"] == 1
     assert len(results["errors"]) == 1
     assert "20260113" in results["errors"][0]
+
+
+def test_pipeline_run_all(tmp_path):
+    data_dir = tmp_path / "data"
+    db_path = str(tmp_path / "registry.db")
+
+    trade_cal_path = data_dir / "trade_cal.parquet"
+    trade_cal_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "cal_date": ["20260112", "20260113"],
+            "is_open": [1, 1],
+        }
+    ).to_parquet(trade_cal_path)
+
+    calls = [
+        pd.DataFrame({"ts_code": ["000001.SZ"]}),
+        pd.DataFrame({"cal_date": ["20260112", "20260113"], "is_open": [1, 1]}),
+        pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.0]}),
+        pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.5]}),
+    ]
+    fetcher = FakeFetcher(calls=calls)
+    metadata = MetadataManager(db_path)
+    writer = ParquetWriter()
+    pipeline = Pipeline(
+        data_dir=data_dir, fetcher=fetcher, metadata=metadata, writer=writer
+    )
+
+    pipeline.run([StockBasicSource(), TradeCalSource(), DailySource()])
+
+    assert (data_dir / "stock_basic.parquet").exists()
+    assert (data_dir / "daily" / "2026_01_12.parquet").exists()
+    assert (data_dir / "daily" / "2026_01_13.parquet").exists()

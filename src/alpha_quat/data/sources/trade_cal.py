@@ -1,5 +1,7 @@
 """Tushare trade_cal API data source."""
+
 from alpha_quat.data.source import DataSource
+
 
 class TradeCalSource(DataSource):
     api_name = "trade_cal"

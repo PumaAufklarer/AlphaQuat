@@ -6,7 +6,9 @@ from alpha_quat.data.writer import ParquetWriter
 
 def test_overwrite_writes_parquet_file(tmp_path):
     writer = ParquetWriter()
-    df = pd.DataFrame({"ts_code": ["000001.SZ", "000002.SZ"], "name": ["平安银行", "万科A"]})
+    df = pd.DataFrame(
+        {"ts_code": ["000001.SZ", "000002.SZ"], "name": ["平安银行", "万科A"]}
+    )
     path = tmp_path / "stock_basic.parquet"
     writer.overwrite(df, path)
     assert path.exists()

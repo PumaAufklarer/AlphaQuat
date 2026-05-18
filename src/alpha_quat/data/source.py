@@ -11,8 +11,7 @@ class DataSource(ABC):
     fields: str
 
     @abstractmethod
-    def get_params(self, trade_date: str | None = None) -> dict:
-        ...
+    def get_params(self, trade_date: str | None = None) -> dict: ...
 
     def path_for(self, data_dir: Path, trade_date: str | None = None) -> Path:
         if self.partition_by == "none":
