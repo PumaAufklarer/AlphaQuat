@@ -56,6 +56,18 @@ class MetadataManager:
             return result[0]
         return None
 
+    def delete_since(self, api_name: str, since: str | None):
+        if since is None:
+            self.conn.execute(
+                "DELETE FROM data_registry WHERE api_name = ?",
+                [api_name],
+            )
+        else:
+            self.conn.execute(
+                "DELETE FROM data_registry WHERE api_name = ? AND trade_date >= ?",
+                [api_name, since],
+            )
+
     def summary(self):
         return self.conn.execute(
             "SELECT api_name, COUNT(*), MAX(trade_date) "

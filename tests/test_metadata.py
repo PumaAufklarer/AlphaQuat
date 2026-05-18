@@ -80,3 +80,38 @@ def test_summary_returns_grouped_counts(tmp_path):
     rows = {r[0]: (r[1], r[2]) for r in result}
     assert rows["daily"] == (2, datetime.date(2026, 5, 11))
     assert rows["stk_st"] == (1, datetime.date(2026, 5, 10))
+
+
+class TestDeleteSince:
+    def test_delete_since_removes_records(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        mgr = MetadataManager(db_path)
+        mgr.insert("alpha158", "2024-01-02", "data/features/2024_01_02.parquet", 5000)
+        mgr.insert("alpha158", "2024-01-03", "data/features/2024_01_03.parquet", 5010)
+        mgr.insert("alpha158", "2024-01-04", "data/features/2024_01_04.parquet", 5020)
+
+        mgr.delete_since("alpha158", "2024-01-03")
+
+        last = mgr.get_last_date("alpha158")
+        assert last == datetime.date(2024, 1, 2)
+
+    def test_delete_since_other_api_unaffected(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        mgr = MetadataManager(db_path)
+        mgr.insert("alpha158", "2024-01-02", "features/2024_01_02.parquet", 5000)
+        mgr.insert("daily", "2024-01-03", "daily/2024_01_03.parquet", 5000)
+
+        mgr.delete_since("alpha158", "2024-01-02")
+
+        assert mgr.get_last_date("alpha158") is None
+        assert mgr.get_last_date("daily") == datetime.date(2024, 1, 3)
+
+    def test_delete_clear_all_for_rebuild(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        mgr = MetadataManager(db_path)
+        mgr.insert("alpha158", "2024-01-02", "features/2024_01_02.parquet", 5000)
+        mgr.insert("alpha158", "2024-01-05", "features/2024_01_05.parquet", 5000)
+
+        mgr.delete_since("alpha158", None)
+
+        assert mgr.get_last_date("alpha158") is None
