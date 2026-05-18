@@ -90,8 +90,7 @@ class TestCompile:
 
     def test_vwap(self):
         result = compile("$vwap")
-        assert "amount" in result
-        assert "NULLIF(volume, 0)" in result
+        assert result == "vwap"
 
     def test_arithmetic(self):
         result = compile("REF($close, 1) / $close - 1")

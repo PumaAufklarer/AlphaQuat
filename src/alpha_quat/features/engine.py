@@ -94,7 +94,8 @@ WITH raw AS (
     d.low,
     d.close,
     d.vol AS volume,
-    d.amount
+    d.amount,
+    d.amount / NULLIF(d.vol, 0) AS vwap
   FROM read_parquet('{daily_path}', hive_partitioning=true) d
   WHERE strptime(CAST(d.trade_date AS VARCHAR), '%Y%m%d') >= strptime('{trade_date}', '%Y%m%d') - INTERVAL {margin} DAY
     AND strptime(CAST(d.trade_date AS VARCHAR), '%Y%m%d') <= strptime('{trade_date}', '%Y%m%d')

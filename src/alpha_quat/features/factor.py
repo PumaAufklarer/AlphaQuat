@@ -69,7 +69,7 @@ def compile(expression: str) -> str:
     expr = expression
 
     # Step 1: Replace $raw field references first (so they're available to all operators)
-    expr = expr.replace("$vwap", "amount / NULLIF(volume, 0)")
+    expr = expr.replace("$vwap", "vwap")
     expr = expr.replace("$open", "open")
     expr = expr.replace("$high", "high")
     expr = expr.replace("$low", "low")
