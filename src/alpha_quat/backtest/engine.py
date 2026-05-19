@@ -92,9 +92,9 @@ class BacktestEngine:
                 and not self._pending_signals.signals.empty
             ):
                 sig_df = self._pending_signals.signals
-                sig_df = sig_df.loc[sig_df["ts_code"].isin(universe)]
+                sig_df = sig_df.loc[sig_df["ts_code"].isin(list(universe))]
 
-                prices_df = daily[["ts_code", "open"]].copy()
+                prices_df: pd.DataFrame = daily[["ts_code", "open"]].copy()  # type: ignore[assignment]
                 ctx = StrategyContext(
                     trade_date=td,
                     capital=self.portfolio.total_value(open_px),
@@ -143,7 +143,7 @@ class BacktestEngine:
             feat_path = self.data_dir / "features" / f"{td}.parquet"
             if feat_path.exists():
                 features = pd.read_parquet(feat_path)
-                features = features.loc[features["ts_code"].isin(universe)]
+                features = features.loc[features["ts_code"].isin(list(universe))]
                 ctx_sig = StrategyContext(
                     trade_date=td, capital=self.portfolio.total_value(close_px)
                 )
