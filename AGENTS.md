@@ -21,6 +21,7 @@ uv run ruff format . && uv run ruff check --fix . && uv run pyright && uv run py
 
 - Package: `alpha-quat` (PyPI) → import `alpha_quat`
 - Source: `src/alpha_quat/`, tests: `tests/`
+- Design specs: `docs/superpowers/specs/`, implementation plans: `docs/superpowers/plans/`
 - `config.yaml` (gitignored) required at runtime:
   ```yaml
   tushare:
@@ -110,6 +111,46 @@ data/
 - **Batch processing** — pipeline processes dates in batches of 20. Each batch builds the CTE chain once and filters by date range (`WHERE trade_date BETWEEN`). Do not change to per-date processing without re-benchmarking (single date: 0.86s, batch of 20: ~3s).
 - **Factor dependencies** — alpha158 factors only depend on `$raw` fields, not other factors. The topo sort exists for future factor sets that build chains of derived factors. Adding a cycle between factors raises `ValueError`.
 
+## Architecture: strategy (`src/alpha_quat/strategy/`)
+
+| Module | Purpose |
+|--------|---------|
+| `types.py` | `StrategyContext` (trade_date, capital, universe, prices, prev_holdings, constraints), `SignalResult`, `StrategyResult` — all dataclasses |
+| `signal.py` | `ISignalGenerator` ABC — one abstract method: `generate(features, ctx) -> SignalResult` |
+| `position.py` | `IPositionManager` ABC — three abstract methods: `allocate(signals, ctx) -> DataFrame`, `constrain(positions, ctx) -> DataFrame`, `execute(target, prev, ctx) -> tuple[DataFrame, DataFrame]` |
+| `strategy.py` | `Strategy` — concrete pipeline orchestrator, constructor-injects `ISignalGenerator` + `IPositionManager`, `run()` chains: generate → allocate → constrain → execute |
+
+**Pipeline contract:**
+
+```
+feature DataFrame (ts_code, trade_date, factors...)
+    │
+    ▼
+ISignalGenerator.generate(features, ctx)          → SignalResult (ts_code, score)
+    │
+    ▼
+IPositionManager.allocate(signals, ctx)            → positions (ts_code, target_weight)
+    │
+    ▼
+IPositionManager.constrain(positions, ctx)         → positions (clamped weights)
+    │
+    ▼
+IPositionManager.execute(positions, prev, ctx)     → (positions, orders)
+    │
+    ▼
+StrategyResult(target_positions, orders, metadata)
+```
+
+**Key rules:**
+
+- **Strategy code never does I/O** — all data flows in via method parameters (DataFrame, StrategyContext). No file reading, no API calls inside strategy code.
+- **DataFrame schema is the contract** between stages — no intermediate DTO classes.
+- **Signal answers "what to trade"** (score). **Position answers "how much and how"** (weight, shares, orders).
+- **Dependency injection** — `Strategy(signal, position)`; any ISignalGenerator + any IPositionManager works.
+- **Pipeline order is immutable** — generate → allocate → constrain → execute. No skipping stages.
+- **`prev_holdings` can be `None`** — first trading day, no prior positions. `execute()` must handle it.
+- **`target_shares` is computed in `execute()`** — needs price from `ctx.prices` (not in `allocate()`).
+
 ## Adding a new data source
 
 1. Create `src/alpha_quat/data/sources/<name>.py` as a DataSource subclass with api_name, partition_by, fields
@@ -123,3 +164,15 @@ data/
 2. Add to `cli.py` `ALL_FEATURE_SETS` dict as `"name": "alpha_quat.features.alphasets.<name>:build_<name>"`
 3. Define `Factor` instances using the DSL: `$close`, `$volume`, `$amount`, `$open`, `$high`, `$low`, `$vwap` for raw fields; `REF(f, N)`, `MEAN(f, N)`, `STD(f, N)`, `SUM(f, N)`, `MAX(f, N)`, `MIN(f, N)`, `CORR(f1, f2, N)`, `DELTA(f, N)`, `RANK(f)`, `QUANTILE(f, N)` for operators
 4. Create `tests/test_features/test_<name>.py` verifying: all compile, no cycles, valid deps, lookback consistent
+
+## Adding a new strategy component
+
+### Adding a new signal strategy
+1. Create `src/alpha_quat/strategy/signals/<name>.py` subclassing `ISignalGenerator`
+2. Implement `generate(features: DataFrame, ctx: StrategyContext) -> SignalResult`
+3. Create `tests/test_strategy/test_<name>.py` (verify SignalResult columns, edge cases)
+
+### Adding a new position manager
+1. Create `src/alpha_quat/strategy/positions/<name>.py` subclassing `IPositionManager`
+2. Implement all three methods: `allocate()`, `constrain()`, `execute()`
+3. Create `tests/test_strategy/test_<name>.py` (verify each step's output schema)
