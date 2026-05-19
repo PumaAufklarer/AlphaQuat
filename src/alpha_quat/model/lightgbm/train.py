@@ -29,6 +29,32 @@ class LightGBMTrainer:
             "n_jobs": self.config.n_jobs,
         }
 
+    def _fit(
+        self,
+        params: dict,
+        X_tr: pd.DataFrame,
+        y_tr: pd.Series,
+        X_val: pd.DataFrame,
+        y_val: pd.Series,
+        n_estimators: int,
+    ) -> lgb.Booster:
+        train_data = lgb.Dataset(X_tr, label=y_tr)
+        valid_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
+
+        callbacks = [
+            lgb.early_stopping(self.config.early_stopping_rounds, verbose=False),
+            lgb.log_evaluation(period=0),
+        ]
+
+        return lgb.train(
+            params,
+            train_data,
+            num_boost_round=n_estimators,
+            valid_sets=[valid_data],
+            valid_names=["valid"],
+            callbacks=callbacks,
+        )
+
     def _train_lgb(
         self,
         params: dict,
@@ -42,23 +68,7 @@ class LightGBMTrainer:
         X_tr, X_ev = X.iloc[:split_idx], X.iloc[split_idx:]
         y_tr, y_ev = y.iloc[:split_idx], y.iloc[split_idx:]
 
-        train_data = lgb.Dataset(X_tr, label=y_tr)
-        valid_data = lgb.Dataset(X_ev, label=y_ev, reference=train_data)
-
-        callbacks = [
-            lgb.early_stopping(self.config.early_stopping_rounds, verbose=False),
-            lgb.log_evaluation(period=0),
-        ]
-
-        model = lgb.train(
-            params,
-            train_data,
-            num_boost_round=n_est,
-            valid_sets=[valid_data],
-            valid_names=["valid"],
-            callbacks=callbacks,
-        )
-        return model
+        return self._fit(params, X_tr, y_tr, X_ev, y_ev, n_est)
 
     def _objective(self, trial: optuna.Trial, X: pd.DataFrame, y: pd.Series) -> float:
         params = self._base_params()
@@ -83,22 +93,7 @@ class LightGBMTrainer:
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-            train_data = lgb.Dataset(X_tr, label=y_tr)
-            valid_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
-
-            callbacks = [
-                lgb.early_stopping(self.config.early_stopping_rounds, verbose=False),
-                lgb.log_evaluation(period=0),
-            ]
-
-            model = lgb.train(
-                params,
-                train_data,
-                num_boost_round=n_est,
-                valid_sets=[valid_data],
-                valid_names=["valid"],
-                callbacks=callbacks,
-            )
+            model = self._fit(params, X_tr, y_tr, X_val, y_val, n_est)
             y_pred = model.predict(X_val)
             mse = float(((y_val.values - y_pred) ** 2).mean())
             scores.append(mse)

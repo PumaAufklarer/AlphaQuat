@@ -4,6 +4,8 @@ import pandas as pd
 from alpha_quat.model.lightgbm.config import LightGBMConfig
 from alpha_quat.model.lightgbm.train import LightGBMTrainer
 
+RNG = np.random.RandomState(42)
+
 
 class TestLightGBMTrainer:
     def test_train_without_tune(self):
@@ -13,11 +15,11 @@ class TestLightGBMTrainer:
         n_samples = 200
         X = pd.DataFrame(
             {
-                "feat1": np.random.randn(n_samples),
-                "feat2": np.random.randn(n_samples),
+                "feat1": RNG.randn(n_samples),
+                "feat2": RNG.randn(n_samples),
             }
         )
-        y = pd.Series(np.random.randn(n_samples))
+        y = pd.Series(RNG.randn(n_samples))
 
         model, params = trainer.train(X, y, "test_label")
 
@@ -33,11 +35,11 @@ class TestLightGBMTrainer:
         n_samples = 200
         X = pd.DataFrame(
             {
-                "feat1": np.random.randn(n_samples),
-                "feat2": np.random.randn(n_samples),
+                "feat1": RNG.randn(n_samples),
+                "feat2": RNG.randn(n_samples),
             }
         )
-        y = pd.Series(np.random.randn(n_samples))
+        y = pd.Series(RNG.randn(n_samples))
 
         model, params = trainer.train(X, y, "test_label_tune")
 
