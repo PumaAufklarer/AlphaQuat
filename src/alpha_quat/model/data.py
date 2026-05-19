@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from alpha_quat.backtest.filters import build_universe
+from alpha_quat.backtest.filters import _date_to_path
 
 
 @dataclass
@@ -24,6 +24,13 @@ class DatasetResult:
 class DatasetBuilder:
     def __init__(self, data_dir: Path):
         self.data_dir = Path(data_dir)
+        self._main_board_cache: set[str] | None = None
+
+    def _get_main_board(self) -> set[str]:
+        if self._main_board_cache is None:
+            sb = pd.read_parquet(self.data_dir / "stock_basic.parquet")
+            self._main_board_cache = set(sb.loc[sb["market"] == "主板", "ts_code"])
+        return self._main_board_cache
 
     def _load_features(self, dates: list[str]) -> pd.DataFrame:
         dfs = []
@@ -38,7 +45,7 @@ class DatasetBuilder:
     def _load_close_series(self, dates: list[str]) -> pd.DataFrame:
         rows = []
         for d in dates:
-            path = self.data_dir / "daily" / f"{d[:4]}_{d[4:6]}_{d[6:8]}.parquet"
+            path = self.data_dir / "daily" / f"{_date_to_path(d)}.parquet"
             if path.exists():
                 df = pd.read_parquet(path, columns=["ts_code", "close"])
                 df["trade_date"] = d
@@ -49,51 +56,57 @@ class DatasetBuilder:
 
     def _get_trade_dates(self) -> pd.Series:
         cal = pd.read_parquet(self.data_dir / "trade_cal.parquet")
-        open_dates = cal.loc[cal["is_open"] == 1, "cal_date"]
+        open_dates = cal.loc[cal["is_open"] == 1, "cal_date"].astype(str)
         return open_dates.sort_values().reset_index(drop=True)
 
-    def _forward_date(
-        self, cal_date_series: pd.Series, date_str: str, offset: int
-    ) -> str | None:
-        positions = np.where(cal_date_series.to_numpy() == date_str)[0]
-        if len(positions) == 0:
-            return None
-        idx = int(positions[0])
-        target_idx = idx + offset
-        if target_idx >= len(cal_date_series):
-            return None
-        return cal_date_series.iloc[target_idx]
-
     def _filter_universe(self, df: pd.DataFrame) -> pd.DataFrame:
+        main_board = self._get_main_board()
         all_dates = df["trade_date"].unique()
         mask = pd.Series(False, index=df.index)
         for d in all_dates:
-            universe = build_universe(str(d), self.data_dir)
-            date_mask = df["trade_date"] == d
-            code_mask = df["ts_code"].isin(list(universe))
-            mask |= date_mask & code_mask
+            st_path = self.data_dir / "stock_st" / f"{_date_to_path(d)}.parquet"
+            st_codes: set[str] = set()
+            if st_path.exists():
+                st = pd.read_parquet(st_path)
+                st_codes = set(st["ts_code"])
+            universe = list(main_board - st_codes)
+            mask |= (df["trade_date"] == d) & df["ts_code"].isin(universe)
         return df.loc[mask].copy()
 
     def _build_labels(
-        self, df: pd.DataFrame, cal_dates: pd.Series, offset: int
+        self,
+        df: pd.DataFrame,
+        cal_dates: pd.Series,
+        offset: int,
+        close_df: pd.DataFrame,
     ) -> pd.Series:
-        close_map = {}
+        cal_arr = cal_dates.to_numpy()
+        date_to_forward: dict[str, str | None] = {}
         for d in df["trade_date"].unique():
-            fwd = self._forward_date(cal_dates, str(d), offset)
-            if fwd is not None:
-                close_path = (
-                    self.data_dir / "daily" / f"{fwd[:4]}_{fwd[4:6]}_{fwd[6:8]}.parquet"
-                )
-                if close_path.exists():
-                    close_df = pd.read_parquet(close_path, columns=["ts_code", "close"])
-                    for _, row in close_df.iterrows():
-                        close_map[(str(d), row["ts_code"])] = row["close"]
+            d_str = str(d)
+            positions = np.where(cal_arr == d_str)[0]
+            if len(positions) == 0:
+                date_to_forward[d_str] = None
+                continue
+            target_idx = int(positions[0]) + offset
+            if target_idx >= len(cal_arr):
+                date_to_forward[d_str] = None
+            else:
+                date_to_forward[d_str] = str(cal_arr[target_idx])
 
-        forward_closes = df.apply(
-            lambda r: close_map.get((str(r["trade_date"]), r["ts_code"]), np.nan),
-            axis=1,
+        fwd_map = df["trade_date"].apply(lambda d: date_to_forward.get(d))
+        fwd_prices = close_df.rename(
+            columns={"trade_date": "fwd_date", "close": "fwd_close"}
         )
-        return forward_closes / df["close"] - 1
+        label_df = df[["ts_code", "trade_date", "close"]].copy()
+        label_df["fwd_date"] = fwd_map
+        label_df = label_df.merge(
+            fwd_prices,
+            left_on=["fwd_date", "ts_code"],
+            right_on=["fwd_date", "ts_code"],
+            how="left",
+        )
+        return label_df["fwd_close"] / label_df["close"] - 1
 
     def build(
         self,
@@ -114,6 +127,9 @@ class DatasetBuilder:
 
         feature_dates = cal_dates.iloc[margin_start : margin_end + 1].tolist()
 
+        close_margin_end = min(len(cal_dates) - 1, end_idx + max_offset)
+        close_dates = cal_dates.iloc[margin_start : close_margin_end + 1].tolist()
+
         features = self._load_features(feature_dates)
 
         if features.empty:
@@ -125,13 +141,13 @@ class DatasetBuilder:
         if feature_names is not None:
             factor_cols = [c for c in factor_cols if c in feature_names]
 
-        close_df = self._load_close_series(feature_dates)
+        close_df = self._load_close_series(close_dates)
         merged = features.merge(close_df, on=["ts_code", "trade_date"], how="left")
         merged = self._filter_universe(merged)
         merged = merged.dropna(subset=["close"])
 
-        merged["ret_5d"] = self._build_labels(merged, cal_dates, 5)
-        merged["ret_20d"] = self._build_labels(merged, cal_dates, 20)
+        merged["ret_5d"] = self._build_labels(merged, cal_dates, 5, close_df)
+        merged["ret_20d"] = self._build_labels(merged, cal_dates, 20, close_df)
 
         merged = merged.dropna(subset=["ret_5d", "ret_20d"] + factor_cols)
 
