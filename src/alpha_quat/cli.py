@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+from pathlib import Path
 
 from alpha_quat.config import Config
 from alpha_quat.data.fetcher import Fetcher
@@ -13,6 +14,9 @@ from alpha_quat.data.sources.trade_cal import TradeCalSource
 from alpha_quat.data.sources.stock_st import StockStSource
 from alpha_quat.data.sources.daily import DailySource
 from alpha_quat.data.sources.daily_basic import DailyBasicSource
+from alpha_quat.backtest.config import BacktestConfig
+from alpha_quat.backtest.engine import BacktestEngine
+from alpha_quat.backtest.report import generate_html_report
 
 ALL_SOURCES = {
     "stock_basic": StockBasicSource,
@@ -59,6 +63,21 @@ def _build_feature_parser(subparsers):
     parser.add_argument(
         "--since", help="Recompute factors from this date (YYYYMMDD) onward"
     )
+    return parser
+
+
+def _build_backtest_parser(subparsers):
+    parser = subparsers.add_parser("backtest", help="Run strategy backtest")
+    parser.add_argument("--start", default="20220501", help="Start date YYYYMMDD")
+    parser.add_argument("--end", default="20260501", help="End date YYYYMMDD")
+    parser.add_argument("--capital", type=float, default=20000, help="Initial capital")
+    parser.add_argument("--monthly", type=float, default=8000, help="Monthly addition")
+    parser.add_argument(
+        "--commission", type=float, default=0.0005, help="Commission rate"
+    )
+    parser.add_argument("--stop-loss", type=float, default=0.15, help="Stop loss pct")
+    parser.add_argument("--top-k", type=int, default=5, help="Max holdings")
+    parser.add_argument("--output", default=None, help="HTML report output path")
     return parser
 
 
@@ -113,6 +132,43 @@ def _cmd_feature(args, config, metadata):
             print(f"  Error: {err}")
 
 
+def _cmd_backtest(args, config):
+    cfg = BacktestConfig(
+        start_date=args.start,
+        end_date=args.end,
+        initial_capital=args.capital,
+        monthly_addition=args.monthly,
+        commission_rate=args.commission,
+        stop_loss_pct=args.stop_loss,
+        top_k=args.top_k,
+    )
+    engine = BacktestEngine(cfg, config.data_dir)
+    result = engine.run()
+
+    metrics = result["metrics"]
+    print()
+    print("=" * 50)
+    print("  BACKTEST RESULTS")
+    print("=" * 50)
+    print(f"  Period:          {cfg.start_date} ~ {cfg.end_date}")
+    print(f"  Total Invested:  {metrics['total_invested']:,.0f}")
+    print(f"  Final Value:     {metrics['final_value']:,.2f}")
+    print(f"  Cumulative Ret:  {metrics['cumulative_return'] * 100:+.2f}%")
+    print(f"  Annualized Ret:  {metrics['annualized_return'] * 100:+.2f}%")
+    print(f"  Max Drawdown:    {metrics['max_drawdown'] * 100:.2f}%")
+    print(f"  Sharpe Ratio:    {metrics['sharpe_ratio']:.2f}")
+    print(f"  Win Rate:        {metrics['win_rate'] * 100:.1f}%")
+    print(f"  Total Trades:    {metrics['total_trades']}")
+    print("=" * 50)
+    print()
+
+    output_path = (
+        Path(args.output) if args.output else config.data_dir / "backtest_report.html"
+    )
+    generate_html_report(result, cfg, output_path)
+    print(f"Report saved to: {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="alpha-quat: stock data fetching and feature engineering"
@@ -130,6 +186,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
     _build_fetch_parser(subparsers)
     _build_feature_parser(subparsers)
+    _build_backtest_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -157,5 +214,7 @@ def main():
 
     if args.command == "feature":
         _cmd_feature(args, config, metadata)
+    elif args.command == "backtest":
+        _cmd_backtest(args, config)
     else:
         _cmd_fetch(args, config, metadata)
