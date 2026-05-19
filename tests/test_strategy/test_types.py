@@ -26,9 +26,9 @@ class TestStrategyContext:
             constraints={"max_single_weight": 0.05},
         )
         assert ctx.universe == ["000001.SZ", "000002.SZ"]
-        assert len(ctx.prices) == 1
-        assert len(ctx.prev_holdings) == 1
-        assert ctx.constraints["max_single_weight"] == 0.05
+        assert ctx.prices is not None and len(ctx.prices) == 1
+        assert ctx.prev_holdings is not None and len(ctx.prev_holdings) == 1
+        assert ctx.constraints is not None and ctx.constraints["max_single_weight"] == 0.05
 
 
 class TestSignalResult:

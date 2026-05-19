@@ -7,7 +7,7 @@ from alpha_quat.strategy.signal import ISignalGenerator
 class TestISignalGenerator:
     def test_cannot_instantiate_abstract(self):
         with pytest.raises(TypeError):
-            ISignalGenerator()
+            ISignalGenerator()  # pyright: ignore[reportAbstractUsage]
 
     def test_concrete_subclass_works(self):
         class MySignal(ISignalGenerator):
@@ -37,4 +37,4 @@ class TestISignalGenerator:
             class BadSignal(ISignalGenerator):
                 pass
 
-            BadSignal()
+            BadSignal()  # pyright: ignore[reportAbstractUsage]

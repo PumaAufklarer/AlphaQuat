@@ -7,7 +7,7 @@ from alpha_quat.strategy.position import IPositionManager
 class TestIPositionManager:
     def test_cannot_instantiate_abstract(self):
         with pytest.raises(TypeError):
-            IPositionManager()
+            IPositionManager()  # pyright: ignore[reportAbstractUsage]
 
     def test_concrete_subclass_works(self):
         class MyPosition(IPositionManager):
@@ -88,32 +88,36 @@ class TestIPositionManager:
         with pytest.raises(TypeError):
 
             class BadPosition1(IPositionManager):
-                def allocate(self, signals, ctx):
-                    pass
+                def allocate(self, signals, ctx) -> pd.DataFrame:
+                    return pd.DataFrame()
 
-                def constrain(self, positions, ctx):
-                    pass
+                def constrain(self, positions, ctx) -> pd.DataFrame:
+                    return positions
 
-            BadPosition1()
+            BadPosition1()  # pyright: ignore[reportAbstractUsage]
 
         with pytest.raises(TypeError):
 
             class BadPosition2(IPositionManager):
-                def allocate(self, signals, ctx):
-                    pass
+                def allocate(self, signals, ctx) -> pd.DataFrame:
+                    return pd.DataFrame()
 
-                def execute(self, target, prev, ctx):
-                    pass
+                def execute(
+                    self, target, prev, ctx
+                ) -> tuple[pd.DataFrame, pd.DataFrame]:
+                    return pd.DataFrame(), pd.DataFrame()
 
-            BadPosition2()
+            BadPosition2()  # pyright: ignore[reportAbstractUsage]
 
         with pytest.raises(TypeError):
 
             class BadPosition3(IPositionManager):
-                def constrain(self, positions, ctx):
-                    pass
+                def constrain(self, positions, ctx) -> pd.DataFrame:
+                    return positions
 
-                def execute(self, target, prev, ctx):
-                    pass
+                def execute(
+                    self, target, prev, ctx
+                ) -> tuple[pd.DataFrame, pd.DataFrame]:
+                    return pd.DataFrame(), pd.DataFrame()
 
-            BadPosition3()
+            BadPosition3()  # pyright: ignore[reportAbstractUsage]
