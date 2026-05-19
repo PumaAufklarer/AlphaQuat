@@ -17,6 +17,8 @@ from alpha_quat.data.sources.daily_basic import DailyBasicSource
 from alpha_quat.backtest.config import BacktestConfig
 from alpha_quat.backtest.engine import BacktestEngine
 from alpha_quat.backtest.report import generate_html_report
+from alpha_quat.model.lightgbm.config import LightGBMConfig
+from alpha_quat.model.lightgbm.pipeline import LightGBMPipeline
 
 ALL_SOURCES = {
     "stock_basic": StockBasicSource,
@@ -169,6 +171,57 @@ def _cmd_backtest(args, config):
     print(f"Report saved to: {output_path}")
 
 
+def _build_model_parser(subparsers):
+    model_parser = subparsers.add_parser("model", help="Train ML models")
+    model_sub = model_parser.add_subparsers(dest="model_type")
+
+    lgb_parser = model_sub.add_parser("lightgbm", help="LightGBM stock selection model")
+    lgb_parser.add_argument(
+        "--train-start", default="20240401", help="Train start YYYYMMDD"
+    )
+    lgb_parser.add_argument(
+        "--train-end", default="20250430", help="Train end YYYYMMDD"
+    )
+    lgb_parser.add_argument(
+        "--val-start", default="20250501", help="Validation start YYYYMMDD"
+    )
+    lgb_parser.add_argument(
+        "--val-end", default="20260430", help="Validation end YYYYMMDD"
+    )
+    lgb_parser.add_argument(
+        "--trials", type=int, default=50, help="Optuna trials (default: 50)"
+    )
+    lgb_parser.add_argument("--no-tune", action="store_true", help="Skip Optuna tuning")
+    lgb_parser.add_argument(
+        "--features",
+        default=None,
+        help="Comma-separated feature subset (default: all 158)",
+    )
+    return model_parser
+
+
+def _cmd_model(args, config):
+    if args.model_type == "lightgbm":
+        feature_names = None
+        if args.features:
+            feature_names = [f.strip() for f in args.features.split(",") if f.strip()]
+
+        cfg = LightGBMConfig(
+            train_start=args.train_start,
+            train_end=args.train_end,
+            val_start=args.val_start,
+            val_end=args.val_end,
+            n_trials=args.trials,
+            tune=not args.no_tune,
+            feature_names=feature_names,
+        )
+        pipeline = LightGBMPipeline(config.data_dir, cfg)
+        pipeline.run()
+    else:
+        print(f"Unknown model type: {args.model_type}")
+        print("Available: lightgbm")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="alpha-quat: stock data fetching and feature engineering"
@@ -187,6 +240,7 @@ def main():
     _build_fetch_parser(subparsers)
     _build_feature_parser(subparsers)
     _build_backtest_parser(subparsers)
+    _build_model_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -216,5 +270,7 @@ def main():
         _cmd_feature(args, config, metadata)
     elif args.command == "backtest":
         _cmd_backtest(args, config)
+    elif args.command == "model":
+        _cmd_model(args, config)
     else:
         _cmd_fetch(args, config, metadata)

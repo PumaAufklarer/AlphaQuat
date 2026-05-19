@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alpha_quat.model.data import DatasetBuilder
 from alpha_quat.model.lightgbm.config import LightGBMConfig
-from alpha_quat.model.lightgbm.evaluate import LightGBMEvaluator
+from alpha_quat.model.lightgbm.evaluate import EvalResult, LightGBMEvaluator
 from alpha_quat.model.lightgbm.train import LightGBMTrainer
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class LightGBMPipeline:
         self.trainer = LightGBMTrainer(config)
         self.evaluator = LightGBMEvaluator()
 
-    def run(self) -> dict[str, object]:
+    def run(self) -> dict[str, EvalResult]:
         logger.info("Building dataset...")
         data = self.builder.build(
             self.config.train_start,
@@ -125,10 +125,10 @@ class LightGBMPipeline:
             print(f"  Mean IC:  {result.mean_ic:.4f}")
             print(f"  IC Std:   {result.ic_std:.4f}")
             print(f"  ICIR:     {result.icir:.4f}")
-            print(f"  Top 5 features (gain):")
+            print("  Top 5 features (gain):")
             for name, val in result.top5_features:
                 print(f"    {name}: {val:.4f}")
-            print(f"  Bottom 5 features (gain):")
+            print("  Bottom 5 features (gain):")
             for name, val in result.bottom5_features:
                 print(f"    {name}: {val:.4f}")
 

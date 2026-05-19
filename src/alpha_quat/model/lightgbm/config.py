@@ -1,4 +1,3 @@
-# src/alpha_quat/model/lightgbm/config.py
 from dataclasses import dataclass
 
 

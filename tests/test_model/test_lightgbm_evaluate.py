@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from alpha_quat.model.lightgbm.evaluate import LightGBMEvaluator, EvalResult
+from alpha_quat.model.lightgbm.evaluate import EvalResult, LightGBMEvaluator
 
 RNG = np.random.RandomState(42)
 
@@ -39,8 +39,9 @@ class TestLightGBMEvaluator:
         val_dates = pd.Series(dates[:n])
         y_val = pd.Series(RNG.randn(n))
         y_pred = RNG.randn(n) * 0.5
+        y_true = np.asarray(y_val, dtype=float)
 
-        result = evaluator.compute_rank_ic(y_pred, y_val.values, val_dates.to_numpy())
+        result = evaluator.compute_rank_ic(y_pred, y_true, val_dates.to_numpy())
 
         assert isinstance(result.mean_ic, float)
         assert isinstance(result.ic_std, float)
