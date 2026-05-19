@@ -60,12 +60,14 @@ class LightGBMEvaluator:
         feature_names: list[str] | None,
         label_name: str,
     ) -> EvalResult:
-        y_pred = model.predict(X_val)
+        y_pred_raw = model.predict(X_val)
+        y_pred = np.asarray(y_pred_raw, dtype=float)
+        y_true = np.asarray(y_val, dtype=float)
 
         mse = float(mean_squared_error(y_val, y_pred))
         mae = float(mean_absolute_error(y_val, y_pred))
 
-        rank_ic = self.compute_rank_ic(y_pred, y_val.values, val_dates.to_numpy())
+        rank_ic = self.compute_rank_ic(y_pred, y_true, val_dates.to_numpy())
 
         importance = model.feature_importance(importance_type="gain")
         feature_names_list = (
