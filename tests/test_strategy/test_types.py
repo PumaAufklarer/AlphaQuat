@@ -13,7 +13,9 @@ class TestStrategyContext:
         assert ctx.constraints is None
 
     def test_create_full(self):
-        prev = pd.DataFrame({"ts_code": ["000001.SZ"], "shares": [1000], "cost": [10.5]})
+        prev = pd.DataFrame(
+            {"ts_code": ["000001.SZ"], "shares": [1000], "cost": [10.5]}
+        )
         prices = pd.DataFrame({"ts_code": ["000001.SZ"], "close": [10.5]})
         ctx = StrategyContext(
             trade_date="20240115",
@@ -31,7 +33,9 @@ class TestStrategyContext:
 
 class TestSignalResult:
     def test_create(self):
-        signals = pd.DataFrame({"ts_code": ["000001.SZ", "000002.SZ"], "score": [0.8, 0.3]})
+        signals = pd.DataFrame(
+            {"ts_code": ["000001.SZ", "000002.SZ"], "score": [0.8, 0.3]}
+        )
         result = SignalResult(signals=signals, metadata={"model": "factor_weighted"})
         assert len(result.signals) == 2
         assert list(result.signals.columns) == ["ts_code", "score"]
@@ -40,18 +44,22 @@ class TestSignalResult:
 
 class TestStrategyResult:
     def test_create(self):
-        positions = pd.DataFrame({
-            "ts_code": ["000001.SZ"],
-            "target_weight": [0.05],
-            "target_shares": [500],
-            "target_amount": [50000.0],
-        })
-        orders = pd.DataFrame({
-            "ts_code": ["000001.SZ"],
-            "action": ["buy"],
-            "delta_shares": [500],
-            "delta_amount": [50000.0],
-        })
+        positions = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "target_weight": [0.05],
+                "target_shares": [500],
+                "target_amount": [50000.0],
+            }
+        )
+        orders = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "action": ["buy"],
+                "delta_shares": [500],
+                "delta_amount": [50000.0],
+            }
+        )
         result = StrategyResult(
             target_positions=positions,
             orders=orders,
