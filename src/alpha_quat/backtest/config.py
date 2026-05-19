@@ -1,0 +1,16 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class BacktestConfig:
+    start_date: str = "20220501"
+    end_date: str = "20260501"
+    initial_capital: float = 20000
+    monthly_addition: float = 8000
+    commission_rate: float = 0.0005
+    min_commission: float = 0.0
+    stop_loss_pct: float = 0.15
+    short_factor: str = "KLEN35"
+    long_factor: str = "KLEN36"
+    top_k: int = 5
+    benchmark: str | None = None
