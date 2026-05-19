@@ -6,12 +6,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "duckdb>=1.5.2",
+    "lightgbm>=4.0",
     "matplotlib>=3.8.0",
+    "numpy>=2.0",
+    "optuna>=4.0",
     "pyarrow>=24.0.0",
     "pyright>=1.1.409",
     "pytest>=9.0.3",
     "pyyaml>=6.0.3",
     "ruff>=0.15.12",
+    "scikit-learn>=1.5",
+    "scipy>=1.14",
     "tushare>=1.4.29",
 ]
 
