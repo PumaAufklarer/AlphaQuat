@@ -1,4 +1,5 @@
 import pandas as pd
+from typing import cast
 from alpha_quat.strategy.types import SignalResult
 from alpha_quat.strategy.signal import ISignalGenerator
 
@@ -31,7 +32,7 @@ class MACrossSignal(ISignalGenerator):
             buy_codes = golden.tolist()
             sell_codes = dead.tolist()
 
-        self._prev = cur[["ts_code", "cross_above"]]
+        self._prev = cast(pd.DataFrame, cur[["ts_code", "cross_above"]])
 
         rows = []
         for c in buy_codes:
