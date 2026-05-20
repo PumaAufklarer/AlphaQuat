@@ -40,6 +40,8 @@ class FeaturePipeline:
 
         if rebuild:
             self.metadata.delete_since(registry.name, None)
+            for f in self.output_dir.glob("*.parquet"):
+                f.unlink()
             pending = list(open_dates)
         elif since:
             self.metadata.delete_since(registry.name, self._to_iso_date(since))

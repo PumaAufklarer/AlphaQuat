@@ -136,7 +136,9 @@ class DatasetBuilder:
             raise ValueError("No feature data found in the specified date range")
 
         factor_cols = [
-            c for c in features.columns if c not in ("ts_code", "trade_date")
+            c
+            for c in features.columns
+            if c != "ts_code" and not c.startswith("trade_date")
         ]
         if feature_names is not None:
             factor_cols = [c for c in factor_cols if c in feature_names]
