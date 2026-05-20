@@ -13,44 +13,37 @@ class TestLightGBMTrainer:
         trainer = LightGBMTrainer(cfg)
 
         n_samples = 200
-        group_size = 40
-        n_groups = n_samples // group_size
         X = pd.DataFrame(
             {
                 "feat1": RNG.randn(n_samples),
                 "feat2": RNG.randn(n_samples),
             }
         )
-        y = pd.Series(RNG.randint(0, 5, n_samples))
-        groups = [group_size] * n_groups
+        y = pd.Series(RNG.randn(n_samples))
 
-        model, params = trainer.train(X, y, "test_label", groups=groups)
+        model, params = trainer.train(X, y, "test_label")
 
         assert params["num_leaves"] == 5
         assert params["n_estimators"] == 10
         assert model is not None
-        assert model.params["objective"] == "lambdarank"
-        assert "ndcg_eval_at" in model.params
+        assert model.params["objective"] == "regression"
 
     def test_train_with_tune_small_search(self):
         cfg = LightGBMConfig(tune=True, n_trials=3, n_estimators=10, num_leaves=5)
         trainer = LightGBMTrainer(cfg)
 
         n_samples = 200
-        group_size = 40
-        n_groups = n_samples // group_size
         X = pd.DataFrame(
             {
                 "feat1": RNG.randn(n_samples),
                 "feat2": RNG.randn(n_samples),
             }
         )
-        y = pd.Series(RNG.randint(0, 5, n_samples))
-        groups = [group_size] * n_groups
+        y = pd.Series(RNG.randn(n_samples))
 
-        model, params = trainer.train(X, y, "test_label_tune", groups=groups)
+        model, params = trainer.train(X, y, "test_label_tune")
 
         assert model is not None
         assert "num_leaves" in params
         assert "learning_rate" in params
-        assert model.params["objective"] == "lambdarank"
+        assert model.params["objective"] == "regression"
