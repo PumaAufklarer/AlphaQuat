@@ -35,11 +35,13 @@ class LightGBMPipeline:
         )
 
         logger.info("Training model_5d...")
-        model_5d, params_5d = self.trainer.train(data.X_train, data.y_train_5, "ret_5d")
+        model_5d, params_5d = self.trainer.train(
+            data.X_train, data.y_train_5, "ret_5d", groups=data.train_groups
+        )
 
         logger.info("Training model_20d...")
         model_20d, params_20d = self.trainer.train(
-            data.X_train, data.y_train_20, "ret_20d"
+            data.X_train, data.y_train_20, "ret_20d", groups=data.train_groups
         )
 
         logger.info("Evaluating model_5d...")

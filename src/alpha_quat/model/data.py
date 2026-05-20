@@ -19,6 +19,8 @@ class DatasetResult:
     val_dates: pd.Series
     train_codes: pd.Series
     val_codes: pd.Series
+    train_groups: list[int]
+    val_groups: list[int]
 
 
 class DatasetBuilder:
@@ -149,10 +151,18 @@ class DatasetBuilder:
         merged["ret_5d"] = self._build_labels(merged, cal_dates, 5, close_df)
         merged["ret_20d"] = self._build_labels(merged, cal_dates, 20, close_df)
 
-        merged["ret_5d"] = merged.groupby("trade_date")["ret_5d"].rank(pct=True)
-        merged["ret_20d"] = merged.groupby("trade_date")["ret_20d"].rank(pct=True)
-
         merged = merged.dropna(subset=["ret_5d", "ret_20d"] + factor_cols)
+
+        for col in ["ret_5d", "ret_20d"]:
+            merged[col] = merged.groupby("trade_date")[col].transform(
+                lambda g: (
+                    pd.qcut(g, min(5, len(g)), labels=False, duplicates="drop")
+                    if len(g) >= 3
+                    else pd.Series(range(len(g)), index=g.index)
+                )
+            )
+            merged = merged.dropna(subset=[col])
+            merged[col] = merged[col].astype(int)
 
         train_mask = (merged["trade_date"] >= train_start) & (
             merged["trade_date"] <= train_end
@@ -163,6 +173,13 @@ class DatasetBuilder:
 
         X_train = merged.loc[train_mask, factor_cols].reset_index(drop=True)
         X_val = merged.loc[val_mask, factor_cols].reset_index(drop=True)
+
+        train_groups = (
+            merged.loc[train_mask].groupby("trade_date", sort=False).size().tolist()
+        )
+        val_groups = (
+            merged.loc[val_mask].groupby("trade_date", sort=False).size().tolist()
+        )
 
         return DatasetResult(
             X_train=X_train,
@@ -175,4 +192,6 @@ class DatasetBuilder:
             val_dates=merged.loc[val_mask, "trade_date"].reset_index(drop=True),
             train_codes=merged.loc[train_mask, "ts_code"].reset_index(drop=True),
             val_codes=merged.loc[val_mask, "ts_code"].reset_index(drop=True),
+            train_groups=train_groups,
+            val_groups=val_groups,
         )
