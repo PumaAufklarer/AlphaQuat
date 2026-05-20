@@ -330,6 +330,32 @@ _FACTORS = [
     Factor(name="KMID100", expression="SUM($amount, 20)", category="volume"),
     Factor(name="KLEN100", expression="SUM($amount, 30)", category="volume"),
     Factor(name="KMID101", expression="SUM($amount, 60)", category="volume"),
+    # === Channel position (price range location) ===
+    Factor(
+        name="CHP5",
+        expression="($close - MIN($low, 5)) / (MAX($high, 5) - MIN($low, 5))",
+        category="price",
+    ),
+    Factor(
+        name="CHP10",
+        expression="($close - MIN($low, 10)) / (MAX($high, 10) - MIN($low, 10))",
+        category="price",
+    ),
+    Factor(
+        name="CHP20",
+        expression="($close - MIN($low, 20)) / (MAX($high, 20) - MIN($low, 20))",
+        category="price",
+    ),
+    Factor(
+        name="CHP30",
+        expression="($close - MIN($low, 30)) / (MAX($high, 30) - MIN($low, 30))",
+        category="price",
+    ),
+    Factor(
+        name="CHP60",
+        expression="($close - MIN($low, 60)) / (MAX($high, 60) - MIN($low, 60))",
+        category="price",
+    ),
 ]
 
 
