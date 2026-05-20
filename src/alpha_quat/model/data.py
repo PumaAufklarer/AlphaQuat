@@ -106,7 +106,7 @@ class DatasetBuilder:
             right_on=["fwd_date", "ts_code"],
             how="left",
         )
-        return label_df["fwd_close"] / label_df["close"] - 1
+        return (label_df["fwd_close"] / label_df["close"] - 1).astype(float)
 
     def build(
         self,
