@@ -81,25 +81,24 @@ class DatasetBuilder:
         close_df: pd.DataFrame,
     ) -> pd.Series:
         cal_arr = cal_dates.to_numpy()
-        date_to_forward: dict[str, str | None] = {}
+        date_index = {str(d): i for i, d in enumerate(cal_arr)}
+        mapping_rows = []
         for d in df["trade_date"].unique():
             d_str = str(d)
-            positions = np.where(cal_arr == d_str)[0]
-            if len(positions) == 0:
-                date_to_forward[d_str] = None
-                continue
-            target_idx = int(positions[0]) + offset
-            if target_idx >= len(cal_arr):
-                date_to_forward[d_str] = None
-            else:
-                date_to_forward[d_str] = str(cal_arr[target_idx])
+            idx = date_index.get(d_str)
+            if idx is not None and idx + offset < len(cal_arr):
+                mapping_rows.append((d_str, str(cal_arr[idx + offset])))
 
-        fwd_map = df["trade_date"].apply(lambda d: date_to_forward.get(d))
+        if not mapping_rows:
+            return pd.Series([np.nan] * len(df), dtype=float)
+
+        mapping_df = pd.DataFrame(mapping_rows, columns=["trade_date", "fwd_date"])
         fwd_prices = close_df.rename(
             columns={"trade_date": "fwd_date", "close": "fwd_close"}
         )
         label_df = df[["ts_code", "trade_date", "close"]].copy()
-        label_df["fwd_date"] = fwd_map
+        label_df["trade_date"] = label_df["trade_date"].astype(str)
+        label_df = label_df.merge(mapping_df, on="trade_date", how="left")
         label_df = label_df.merge(
             fwd_prices,
             left_on=["fwd_date", "ts_code"],
