@@ -149,6 +149,9 @@ class DatasetBuilder:
         merged["ret_5d"] = self._build_labels(merged, cal_dates, 5, close_df)
         merged["ret_20d"] = self._build_labels(merged, cal_dates, 20, close_df)
 
+        merged["ret_5d"] = merged.groupby("trade_date")["ret_5d"].rank(pct=True)
+        merged["ret_20d"] = merged.groupby("trade_date")["ret_20d"].rank(pct=True)
+
         merged = merged.dropna(subset=["ret_5d", "ret_20d"] + factor_cols)
 
         train_mask = (merged["trade_date"] >= train_start) & (
