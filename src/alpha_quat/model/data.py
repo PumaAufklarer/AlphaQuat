@@ -64,7 +64,8 @@ class DatasetBuilder:
             idx_20 = i + 20
             fwd_5 = str(cal_arr[idx_5]) if idx_5 < len(cal_arr) else None
             fwd_20 = str(cal_arr[idx_20]) if idx_20 < len(cal_arr) else None
-            fwd_rows.append((d, fwd_5, fwd_20))
+            if fwd_5 is not None and fwd_20 is not None:
+                fwd_rows.append((d, fwd_5, fwd_20))
 
         fwd_df = pd.DataFrame(fwd_rows, columns=["trade_date", "fwd_5", "fwd_20"])
 
