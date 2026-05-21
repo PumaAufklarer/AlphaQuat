@@ -356,6 +356,64 @@ _FACTORS = [
         expression="($close - MIN($low, 60)) / (MAX($high, 60) - MIN($low, 60))",
         category="price",
     ),
+    # === ZSCORE — Bollinger band position (std deviations from mean) ===
+    Factor(
+        name="ZSCORE5",
+        expression="($close - MEAN($close, 5)) / STD($close, 5)",
+        category="price",
+    ),
+    Factor(
+        name="ZSCORE10",
+        expression="($close - MEAN($close, 10)) / STD($close, 10)",
+        category="price",
+    ),
+    Factor(
+        name="ZSCORE20",
+        expression="($close - MEAN($close, 20)) / STD($close, 20)",
+        category="price",
+    ),
+    Factor(
+        name="ZSCORE30",
+        expression="($close - MEAN($close, 30)) / STD($close, 30)",
+        category="price",
+    ),
+    Factor(
+        name="ZSCORE60",
+        expression="($close - MEAN($close, 60)) / STD($close, 60)",
+        category="price",
+    ),
+    # === SKEWP — mean position in price channel (distribution shape proxy) ===
+    Factor(
+        name="SKEWP5",
+        expression="(MEAN($close, 5) - MIN($close, 5)) / (MAX($close, 5) - MIN($close, 5))",
+        category="price",
+    ),
+    Factor(
+        name="SKEWP10",
+        expression="(MEAN($close, 10) - MIN($close, 10)) / (MAX($close, 10) - MIN($close, 10))",
+        category="price",
+    ),
+    Factor(
+        name="SKEWP20",
+        expression="(MEAN($close, 20) - MIN($close, 20)) / (MAX($close, 20) - MIN($close, 20))",
+        category="price",
+    ),
+    Factor(
+        name="SKEWP30",
+        expression="(MEAN($close, 30) - MIN($close, 30)) / (MAX($close, 30) - MIN($close, 30))",
+        category="price",
+    ),
+    Factor(
+        name="SKEWP60",
+        expression="(MEAN($close, 60) - MIN($close, 60)) / (MAX($close, 60) - MIN($close, 60))",
+        category="price",
+    ),
+    # === GAP — overnight gap ===
+    Factor(
+        name="GAP",
+        expression="$open / REF($close, 1) - 1",
+        category="price",
+    ),
 ]
 
 
