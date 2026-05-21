@@ -112,9 +112,11 @@ class DatasetBuilder:
             WHERE trade_date >= '{all_start}' AND trade_date <= '{all_end}'
         ),
         daily AS (
-            SELECT ts_code, trade_date, close
-            FROM read_parquet('{daily_path}', hive_partitioning=false)
-            WHERE trade_date >= '{all_start}'
+            SELECT CAST(ts_code AS VARCHAR) AS ts_code,
+                   CAST(trade_date AS VARCHAR) AS trade_date,
+                   CAST(close AS DOUBLE) AS close
+            FROM read_parquet('{daily_path}', hive_partitioning=false, union_by_name=true)
+            WHERE CAST(trade_date AS VARCHAR) >= '{all_start}'
         ),
         fwd_map AS (SELECT * FROM fwd_df),
         main_board AS (SELECT * FROM main_board),
