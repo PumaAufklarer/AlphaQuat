@@ -363,6 +363,37 @@ _FACTORS = [
         expression="($high - $close) / ($high - $low)",
         category="price",
     ),
+    # === Fundamental factors (valuation, size, liquidity) ===
+    Factor(
+        name="PE_TTM",
+        expression="$pe_ttm",
+        category="fundamental",
+    ),
+    Factor(
+        name="PB",
+        expression="$pb",
+        category="fundamental",
+    ),
+    Factor(
+        name="ROE",
+        expression="$pb / NULLIF($pe_ttm, 0)",
+        category="fundamental",
+    ),
+    Factor(
+        name="LOG_MV",
+        expression="LOG($total_mv)",
+        category="fundamental",
+    ),
+    Factor(
+        name="TURN",
+        expression="$turnover_rate",
+        category="fundamental",
+    ),
+    Factor(
+        name="VOLRATIO",
+        expression="$volume_ratio",
+        category="fundamental",
+    ),
 ]
 
 

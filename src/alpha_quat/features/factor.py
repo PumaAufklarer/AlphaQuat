@@ -76,6 +76,11 @@ def compile(expression: str) -> str:
     expr = expr.replace("$close", "close")
     expr = expr.replace("$volume", "volume")
     expr = expr.replace("$amount", "amount")
+    expr = expr.replace("$pe_ttm", "pe_ttm")
+    expr = expr.replace("$pb", "pb")
+    expr = expr.replace("$total_mv", "total_mv")
+    expr = expr.replace("$turnover_rate", "turnover_rate")
+    expr = expr.replace("$volume_ratio", "volume_ratio")
 
     # Step 2: RANK/QUANTILE — outermost operators, may contain REF/MEAN/STD/etc.
     # Must run BEFORE window function substitutions so inner expressions stay clean.

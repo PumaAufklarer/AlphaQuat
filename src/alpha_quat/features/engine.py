@@ -107,6 +107,42 @@ ORDER BY ts_code, trade_date
 
     def _base_cte_range(self, min_date: str, max_date: str, margin: int) -> str:
         daily_path = self.data_dir / "daily" / "**" / "*.parquet"
+        basic_dir = self.data_dir / "daily_basic"
+
+        has_basic = basic_dir.exists() and list(basic_dir.glob("**/*.parquet"))
+
+        if has_basic:
+            basic_path = basic_dir / "**" / "*.parquet"
+            basic_join = f"""LEFT JOIN (
+      SELECT ts_code, trade_date,
+        COALESCE(pe, NULL::DOUBLE) AS pe,
+        COALESCE(pe_ttm, NULL::DOUBLE) AS pe_ttm,
+        COALESCE(pb, NULL::DOUBLE) AS pb,
+        COALESCE(total_mv, NULL::DOUBLE) AS total_mv,
+        COALESCE(circ_mv, NULL::DOUBLE) AS circ_mv,
+        COALESCE(turnover_rate, NULL::DOUBLE) AS turnover_rate,
+        COALESCE(volume_ratio, NULL::DOUBLE) AS volume_ratio
+      FROM read_parquet('{basic_path}', hive_partitioning=true, union_by_name=true)
+    ) db
+    ON d.ts_code = db.ts_code AND d.trade_date = db.trade_date"""
+            basic_cols = """,
+    db.pe,
+    db.pe_ttm,
+    db.pb,
+    db.total_mv,
+    db.circ_mv,
+    db.turnover_rate,
+    db.volume_ratio"""
+        else:
+            basic_join = ""
+            basic_cols = """,
+    NULL::DOUBLE AS pe,
+    NULL::DOUBLE AS pe_ttm,
+    NULL::DOUBLE AS pb,
+    NULL::DOUBLE AS total_mv,
+    NULL::DOUBLE AS circ_mv,
+    NULL::DOUBLE AS turnover_rate,
+    NULL::DOUBLE AS volume_ratio"""
 
         return f"""
 WITH raw AS (
@@ -119,8 +155,9 @@ WITH raw AS (
     d.close,
     d.vol AS volume,
     d.amount,
-    d.amount / NULLIF(d.vol, 0) AS vwap
+    d.amount / NULLIF(d.vol, 0) AS vwap{basic_cols}
   FROM read_parquet('{daily_path}', hive_partitioning=true) d
+  {basic_join}
   WHERE strptime(CAST(d.trade_date AS VARCHAR), '%Y%m%d') >= strptime('{min_date}', '%Y%m%d') - INTERVAL {margin} DAY
     AND strptime(CAST(d.trade_date AS VARCHAR), '%Y%m%d') <= strptime('{max_date}', '%Y%m%d')
 )"""

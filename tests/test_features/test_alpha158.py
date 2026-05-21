@@ -27,7 +27,20 @@ class TestAlpha158:
     def test_all_deps_exist(self):
         reg = build_alpha158()
         factor_names = set(reg.factors.keys())
-        raw_fields = {"$open", "$high", "$low", "$close", "$volume", "$amount", "$vwap"}
+        raw_fields = {
+            "$open",
+            "$high",
+            "$low",
+            "$close",
+            "$volume",
+            "$amount",
+            "$vwap",
+            "$pe_ttm",
+            "$pb",
+            "$total_mv",
+            "$turnover_rate",
+            "$volume_ratio",
+        }
         for factor in reg.factors.values():
             for dep in factor.depends_on:
                 if dep.startswith("$"):

@@ -146,8 +146,13 @@ class TestFeatureEngine:
                     {
                         "ts_code": stock,
                         "trade_date": date,
+                        "pe": 15.0 + i,
+                        "pe_ttm": 14.0 + i,
+                        "pb": 2.0 + i * 0.1,
                         "total_mv": 1e8,
                         "circ_mv": 5e7,
+                        "turnover_rate": 0.5,
+                        "volume_ratio": 1.0,
                     }
                 )
         make_daily_parquet(tmp_path, daily_data)
