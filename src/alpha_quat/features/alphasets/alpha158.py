@@ -321,73 +321,14 @@ _FACTORS = [
     Factor(name="KLEN95", expression="SUM($close, 30)", category="price"),
     Factor(name="KMID96", expression="SUM($close, 60)", category="price"),
     Factor(name="KLEN96", expression="SUM($volume, 5)", category="volume"),
-    Factor(name="KMID97", expression="SUM($volume, 10)", category="volume"),
-    Factor(name="KLEN97", expression="SUM($volume, 20)", category="volume"),
-    Factor(name="KMID98", expression="SUM($volume, 30)", category="volume"),
-    Factor(name="KLEN98", expression="SUM($volume, 60)", category="volume"),
-    Factor(name="KMID99", expression="SUM($amount, 5)", category="volume"),
-    Factor(name="KLEN99", expression="SUM($amount, 10)", category="volume"),
-    Factor(name="KMID100", expression="SUM($amount, 20)", category="volume"),
-    Factor(name="KLEN100", expression="SUM($amount, 30)", category="volume"),
-    Factor(name="KMID101", expression="SUM($amount, 60)", category="volume"),
-    # === Channel position (price range location) ===
-    Factor(
-        name="CHP5",
-        expression="($close - MIN($low, 5)) / (MAX($high, 5) - MIN($low, 5))",
-        category="price",
-    ),
-    Factor(
-        name="CHP10",
-        expression="($close - MIN($low, 10)) / (MAX($high, 10) - MIN($low, 10))",
-        category="price",
-    ),
-    Factor(
-        name="CHP20",
-        expression="($close - MIN($low, 20)) / (MAX($high, 20) - MIN($low, 20))",
-        category="price",
-    ),
+    Factor(name="KLEN96", expression="SUM($volume, 5)", category="volume"),
+    # === Channel position — only 30d window is effective ===
     Factor(
         name="CHP30",
         expression="($close - MIN($low, 30)) / (MAX($high, 30) - MIN($low, 30))",
         category="price",
     ),
-    Factor(
-        name="CHP60",
-        expression="($close - MIN($low, 60)) / (MAX($high, 60) - MIN($low, 60))",
-        category="price",
-    ),
-    # === ZSCORE — Bollinger band position (std deviations from mean) ===
-    Factor(
-        name="ZSCORE5",
-        expression="($close - MEAN($close, 5)) / STD($close, 5)",
-        category="price",
-    ),
-    Factor(
-        name="ZSCORE10",
-        expression="($close - MEAN($close, 10)) / STD($close, 10)",
-        category="price",
-    ),
-    Factor(
-        name="ZSCORE20",
-        expression="($close - MEAN($close, 20)) / STD($close, 20)",
-        category="price",
-    ),
-    Factor(
-        name="ZSCORE30",
-        expression="($close - MEAN($close, 30)) / STD($close, 30)",
-        category="price",
-    ),
-    Factor(
-        name="ZSCORE60",
-        expression="($close - MEAN($close, 60)) / STD($close, 60)",
-        category="price",
-    ),
-    # === SKEWP — mean position in price channel (distribution shape proxy) ===
-    Factor(
-        name="SKEWP5",
-        expression="(MEAN($close, 5) - MIN($close, 5)) / (MAX($close, 5) - MIN($close, 5))",
-        category="price",
-    ),
+    # === SKEWP — mean position in price channel, 10/20d windows only ===
     Factor(
         name="SKEWP10",
         expression="(MEAN($close, 10) - MIN($close, 10)) / (MAX($close, 10) - MIN($close, 10))",
@@ -398,20 +339,28 @@ _FACTORS = [
         expression="(MEAN($close, 20) - MIN($close, 20)) / (MAX($close, 20) - MIN($close, 20))",
         category="price",
     ),
-    Factor(
-        name="SKEWP30",
-        expression="(MEAN($close, 30) - MIN($close, 30)) / (MAX($close, 30) - MIN($close, 30))",
-        category="price",
-    ),
-    Factor(
-        name="SKEWP60",
-        expression="(MEAN($close, 60) - MIN($close, 60)) / (MAX($close, 60) - MIN($close, 60))",
-        category="price",
-    ),
     # === GAP — overnight gap ===
     Factor(
         name="GAP",
         expression="$open / REF($close, 1) - 1",
+        category="price",
+    ),
+    # === DRP — daily relative position in intraday range ===
+    Factor(
+        name="DRP",
+        expression="($close - $low) / ($high - $low)",
+        category="price",
+    ),
+    # === O2C — open-to-close intraday return ===
+    Factor(
+        name="O2C",
+        expression="$close / $open - 1",
+        category="price",
+    ),
+    # === HLC — selling pressure (drop from day's high) ===
+    Factor(
+        name="HLC",
+        expression="($high - $close) / ($high - $low)",
         category="price",
     ),
 ]
