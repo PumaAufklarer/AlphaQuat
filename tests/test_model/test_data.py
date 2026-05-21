@@ -28,12 +28,17 @@ def _make_daily(
 ):
     daily_dir = data_dir / "daily"
     daily_dir.mkdir()
+    rng = np.random.RandomState(42)
     for d in dates:
+        close_vals = rng.uniform(5, 50, len(ts_codes))
         df = pd.DataFrame(
             {
                 "ts_code": ts_codes,
                 "trade_date": d,
-                close_col: np.random.uniform(5, 50, len(ts_codes)),
+                "open": close_vals * rng.uniform(0.98, 1.02, len(ts_codes)),
+                "high": close_vals + rng.uniform(0, 2, len(ts_codes)),
+                "low": close_vals - rng.uniform(0, 2, len(ts_codes)),
+                close_col: close_vals,
             }
         )
         path = f"{d[:4]}_{d[4:6]}_{d[6:8]}.parquet"

@@ -116,6 +116,9 @@ class DatasetBuilder:
         daily AS (
             SELECT CAST(ts_code AS VARCHAR) AS ts_code,
                    CAST(trade_date AS VARCHAR) AS trade_date,
+                   CAST(open AS DOUBLE) AS open,
+                   CAST(high AS DOUBLE) AS high,
+                   CAST(low AS DOUBLE) AS low,
                    CAST(close AS DOUBLE) AS close
             FROM read_parquet('{daily_path}', hive_partitioning=false, union_by_name=true)
             WHERE CAST(trade_date AS VARCHAR) >= '{all_start}'
@@ -124,37 +127,54 @@ class DatasetBuilder:
         main_board AS (SELECT * FROM main_board),
         {st_clause}
         universe AS (
-            SELECT d.ts_code, d.trade_date, d.close
+            SELECT d.ts_code, d.trade_date
             FROM daily d
             INNER JOIN main_board m ON d.ts_code = m.ts_code
             {st_join}
         ),
         base AS (
-            SELECT f.*, u.close
+            SELECT f.*
             FROM features f
             INNER JOIN universe u ON f.ts_code = u.ts_code AND f.trade_date = u.trade_date
         ),
-        with_fwd AS (
-            SELECT b.*,
-                   fm.fwd_5, fm.fwd_20,
-                   d5.close AS close_5,
-                   d20.close AS close_20
+        channel_5d AS (
+            SELECT b.ts_code, b.trade_date,
+                   MIN(d.low) AS min_low_5,
+                   MAX(d.high) AS max_high_5,
+                   MAX(CASE WHEN d.trade_date = fm.fwd_5 THEN d.close END) AS close_5
             FROM base b
-            LEFT JOIN fwd_map fm ON b.trade_date = fm.trade_date
-            LEFT JOIN daily d5 ON b.ts_code = d5.ts_code AND fm.fwd_5 = d5.trade_date
-            LEFT JOIN daily d20 ON b.ts_code = d20.ts_code AND fm.fwd_20 = d20.trade_date
+            JOIN fwd_map fm ON b.trade_date = fm.trade_date
+            JOIN daily d ON b.ts_code = d.ts_code
+                AND d.trade_date >= b.trade_date
+                AND d.trade_date <= fm.fwd_5
+            GROUP BY b.ts_code, b.trade_date
+        ),
+        channel_20d AS (
+            SELECT b.ts_code, b.trade_date,
+                   MIN(d.low) AS min_low_20,
+                   MAX(d.high) AS max_high_20,
+                   MAX(CASE WHEN d.trade_date = fm.fwd_20 THEN d.close END) AS close_20
+            FROM base b
+            JOIN fwd_map fm ON b.trade_date = fm.trade_date
+            JOIN daily d ON b.ts_code = d.ts_code
+                AND d.trade_date >= b.trade_date
+                AND d.trade_date <= fm.fwd_20
+            GROUP BY b.ts_code, b.trade_date
         ),
         labeled AS (
-            SELECT *,
-                   close_5 / NULLIF(close, 0) - 1 AS ret_5d,
-                   close_20 / NULLIF(close, 0) - 1 AS ret_20d
-            FROM with_fwd
-            WHERE close IS NOT NULL
-              AND close_5 IS NOT NULL
-              AND close_20 IS NOT NULL
+            SELECT b.*,
+                   (c5.close_5 - c5.min_low_5) / NULLIF(c5.max_high_5 - c5.min_low_5, 0) AS ret_5d,
+                   (c20.close_20 - c20.min_low_20) / NULLIF(c20.max_high_20 - c20.min_low_20, 0) AS ret_20d
+            FROM base b
+            LEFT JOIN channel_5d c5 ON b.ts_code = c5.ts_code AND b.trade_date = c5.trade_date
+            LEFT JOIN channel_20d c20 ON b.ts_code = c20.ts_code AND b.trade_date = c20.trade_date
+            WHERE c5.close_5 IS NOT NULL
+              AND c20.close_20 IS NOT NULL
+              AND c5.max_high_5 != c5.min_low_5
+              AND c20.max_high_20 != c20.min_low_20
               AND {factor_notnull}
         )
-        SELECT ts_code, trade_date, close, ret_5d, ret_20d, {factor_select}
+        SELECT ts_code, trade_date, ret_5d, ret_20d, {factor_select}
         FROM labeled
         ORDER BY trade_date
         """

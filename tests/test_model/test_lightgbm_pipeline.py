@@ -54,11 +54,15 @@ def _make_synthetic_data(data_dir: Path):
     daily_dir.mkdir()
     all_dates = train_dates + val_dates + margin_dates
     for d in all_dates:
+        close_vals = RNG.uniform(5, 50, len(ts_codes))
         df = pd.DataFrame(
             {
                 "ts_code": ts_codes,
                 "trade_date": d,
-                "close": RNG.uniform(5, 50, len(ts_codes)),
+                "open": close_vals * RNG.uniform(0.98, 1.02, len(ts_codes)),
+                "high": close_vals + RNG.uniform(0, 2, len(ts_codes)),
+                "low": close_vals - RNG.uniform(0, 2, len(ts_codes)),
+                "close": close_vals,
             }
         )
         path = f"{d[:4]}_{d[4:6]}_{d[6:8]}.parquet"
