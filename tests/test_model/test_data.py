@@ -8,6 +8,14 @@ import pandas as pd
 from alpha_quat.model.data import DatasetBuilder, DatasetResult
 
 
+def _generate_dates(start: str, n: int) -> list[str]:
+    """Generate n consecutive business dates starting from start (YYYYMMDD)."""
+    return [d.strftime("%Y%m%d") for d in pd.bdate_range(start=start, periods=n)]
+
+
+MARGIN_DATES_70 = _generate_dates("20240112", 80)
+
+
 def _make_features(data_dir: Path, dates: list[str], ts_codes: list[str]):
     feat_dir = data_dir / "features"
     feat_dir.mkdir()
@@ -74,28 +82,7 @@ class TestDatasetBuilder:
 
             train_dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
             val_dates = ["20240109", "20240110", "20240111"]
-            margin_dates = [
-                "20240112",
-                "20240115",
-                "20240116",
-                "20240117",
-                "20240118",
-                "20240119",
-                "20240122",
-                "20240123",
-                "20240124",
-                "20240125",
-                "20240126",
-                "20240129",
-                "20240130",
-                "20240131",
-                "20240201",
-                "20240202",
-                "20240205",
-                "20240206",
-                "20240207",
-                "20240208",
-            ]
+            margin_dates = MARGIN_DATES_70
             all_feat_dates = train_dates + val_dates + margin_dates
             all_daily_dates = train_dates + val_dates + margin_dates
 
@@ -121,28 +108,7 @@ class TestDatasetBuilder:
             ts_codes = ["000001.SZ", "000002.SZ"]
 
             train_dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
-            margin_dates = [
-                "20240109",
-                "20240110",
-                "20240111",
-                "20240112",
-                "20240115",
-                "20240116",
-                "20240117",
-                "20240118",
-                "20240119",
-                "20240122",
-                "20240123",
-                "20240124",
-                "20240125",
-                "20240126",
-                "20240129",
-                "20240130",
-                "20240131",
-                "20240201",
-                "20240202",
-                "20240205",
-            ]
+            margin_dates = MARGIN_DATES_70
             all_feat_dates = train_dates + margin_dates
             all_daily_dates = train_dates + margin_dates
 
@@ -165,28 +131,7 @@ class TestDatasetBuilder:
 
             train_dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
             val_dates = ["20240109"]
-            margin_dates = [
-                "20240110",
-                "20240111",
-                "20240112",
-                "20240115",
-                "20240116",
-                "20240117",
-                "20240118",
-                "20240119",
-                "20240122",
-                "20240123",
-                "20240124",
-                "20240125",
-                "20240126",
-                "20240129",
-                "20240130",
-                "20240131",
-                "20240201",
-                "20240202",
-                "20240205",
-                "20240206",
-            ]
+            margin_dates = MARGIN_DATES_70
             all_feat_dates = train_dates + val_dates + margin_dates
             all_daily_dates = train_dates + val_dates + margin_dates
 
@@ -209,28 +154,7 @@ class TestDatasetBuilder:
             ts_codes = ["000001.SZ", "000002.SZ", "300001.SZ"]
 
             train_dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
-            margin_dates = [
-                "20240109",
-                "20240110",
-                "20240111",
-                "20240112",
-                "20240115",
-                "20240116",
-                "20240117",
-                "20240118",
-                "20240119",
-                "20240122",
-                "20240123",
-                "20240124",
-                "20240125",
-                "20240126",
-                "20240129",
-                "20240130",
-                "20240131",
-                "20240201",
-                "20240202",
-                "20240205",
-            ]
+            margin_dates = MARGIN_DATES_70
             all_feat_dates = train_dates + margin_dates
             all_daily_dates = train_dates + margin_dates
 

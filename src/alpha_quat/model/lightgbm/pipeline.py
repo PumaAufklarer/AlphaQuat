@@ -42,6 +42,11 @@ class LightGBMPipeline:
             data.X_train, data.y_train_20, "ret_20d"
         )
 
+        logger.info("Training model_60d...")
+        model_60d, params_60d = self.trainer.train(
+            data.X_train, data.y_train_60, "ret_60d"
+        )
+
         logger.info("Evaluating model_5d...")
         result_5d = self.evaluator.evaluate(
             model_5d,
@@ -66,20 +71,33 @@ class LightGBMPipeline:
             "ret_20d",
         )
 
-        self._save_models(model_5d, model_20d)
-        self._save_results(result_5d, result_20d)
-        self._print_summary(result_5d, result_20d)
+        logger.info("Evaluating model_60d...")
+        result_60d = self.evaluator.evaluate(
+            model_60d,
+            data.X_val,
+            data.y_val_60,
+            data.val_dates,
+            data.val_codes,
+            params_60d,
+            self.config.feature_names,
+            "ret_60d",
+        )
 
-        return {"ret_5d": result_5d, "ret_20d": result_20d}
+        self._save_models(model_5d, model_20d, model_60d)
+        self._save_results(result_5d, result_20d, result_60d)
+        self._print_summary(result_5d, result_20d, result_60d)
 
-    def _save_models(self, model_5d, model_20d):
+        return {"ret_5d": result_5d, "ret_20d": result_20d, "ret_60d": result_60d}
+
+    def _save_models(self, model_5d, model_20d, model_60d):
         output_dir = self.data_dir / "models"
         output_dir.mkdir(parents=True, exist_ok=True)
         model_5d.save_model(str(output_dir / "lightgbm_model_5d.txt"))
         model_20d.save_model(str(output_dir / "lightgbm_model_20d.txt"))
+        model_60d.save_model(str(output_dir / "lightgbm_model_60d.txt"))
         logger.info("Models saved to %s", output_dir)
 
-    def _save_results(self, result_5d, result_20d):
+    def _save_results(self, result_5d, result_20d, result_60d):
         output_dir = self.data_dir / "models"
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -100,6 +118,7 @@ class LightGBMPipeline:
             "model_type": "lightgbm",
             "ret_5d": _make_json(result_5d),
             "ret_20d": _make_json(result_20d),
+            "ret_60d": _make_json(result_60d),
             "config": {
                 "train_start": self.config.train_start,
                 "train_end": self.config.train_end,
@@ -112,13 +131,17 @@ class LightGBMPipeline:
             json.dump(output, f, indent=2, ensure_ascii=False, default=str)
         logger.info("Results saved to %s", output_dir / "results.json")
 
-    def _print_summary(self, result_5d, result_20d):
+    def _print_summary(self, result_5d, result_20d, result_60d):
         print()
         print("=" * 60)
         print("  LIGHTGBM MODEL EVALUATION")
         print("=" * 60)
 
-        for label, result in [("ret_5d", result_5d), ("ret_20d", result_20d)]:
+        for label, result in [
+            ("ret_5d", result_5d),
+            ("ret_20d", result_20d),
+            ("ret_60d", result_60d),
+        ]:
             print(f"\n  --- {label} ---")
             print(f"  MSE:      {result.mse:.6f}")
             print(f"  MAE:      {result.mae:.6f}")

@@ -6,7 +6,6 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from alpha_quat.backtest.filters import _date_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,8 @@ class DatasetResult:
     y_val_5: pd.Series
     y_train_20: pd.Series
     y_val_20: pd.Series
+    y_train_60: pd.Series
+    y_val_60: pd.Series
     train_dates: pd.Series
     val_dates: pd.Series
     train_codes: pd.Series
@@ -45,7 +46,7 @@ class DatasetBuilder:
         cal_dates = self._get_trade_dates()
         cal_arr = cal_dates.to_numpy()
 
-        max_offset = 20
+        max_offset = 60
         start_idx = int(np.where(cal_arr >= train_start)[0][0])
         end_idx = int(np.where(cal_arr <= val_end)[0][-1])
         margin_start = max(0, start_idx - max_offset)
@@ -56,22 +57,26 @@ class DatasetBuilder:
         all_end = feature_dates[-1]
 
         # Build forward date mapping
-        date_index = {str(d): i for i, d in enumerate(cal_arr)}
+        date_index = {str(d): i for i, d in enumerate(cal_arr)}  # noqa: F841
         fwd_rows = []
         for i in range(margin_start, margin_end + 1):
             d = str(cal_arr[i])
             idx_5 = i + 5
             idx_20 = i + 20
+            idx_60 = i + 60
             fwd_5 = str(cal_arr[idx_5]) if idx_5 < len(cal_arr) else None
             fwd_20 = str(cal_arr[idx_20]) if idx_20 < len(cal_arr) else None
-            if fwd_5 is not None and fwd_20 is not None:
-                fwd_rows.append((d, fwd_5, fwd_20))
+            fwd_60 = str(cal_arr[idx_60]) if idx_60 < len(cal_arr) else None
+            if fwd_5 is not None and fwd_20 is not None and fwd_60 is not None:
+                fwd_rows.append((d, fwd_5, fwd_20, fwd_60))
 
-        fwd_df = pd.DataFrame(fwd_rows, columns=["trade_date", "fwd_5", "fwd_20"])
+        fwd_df = pd.DataFrame(  # noqa: F841
+            fwd_rows, columns=["trade_date", "fwd_5", "fwd_20", "fwd_60"]
+        )
 
         # Read stock_basic for main board filter
         sb = pd.read_parquet(self.data_dir / "stock_basic.parquet")
-        main_board = sb.loc[sb["market"] == "主板", ["ts_code"]].copy()
+        main_board = sb.loc[sb["market"] == "主板", ["ts_code"]].copy()  # noqa: F841
 
         con = duckdb.connect(":memory:")
 
@@ -161,20 +166,36 @@ class DatasetBuilder:
                 AND d.trade_date <= fm.fwd_20
             GROUP BY b.ts_code, b.trade_date
         ),
+        channel_60d AS (
+            SELECT b.ts_code, b.trade_date,
+                   MIN(d.low) AS min_low_60,
+                   MAX(d.high) AS max_high_60,
+                   MAX(CASE WHEN d.trade_date = fm.fwd_60 THEN d.close END) AS close_60
+            FROM base b
+            JOIN fwd_map fm ON b.trade_date = fm.trade_date
+            JOIN daily d ON b.ts_code = d.ts_code
+                AND d.trade_date >= b.trade_date
+                AND d.trade_date <= fm.fwd_60
+            GROUP BY b.ts_code, b.trade_date
+        ),
         labeled AS (
             SELECT b.*,
                    (c5.close_5 - c5.min_low_5) / NULLIF(c5.max_high_5 - c5.min_low_5, 0) AS ret_5d,
-                   (c20.close_20 - c20.min_low_20) / NULLIF(c20.max_high_20 - c20.min_low_20, 0) AS ret_20d
+                   (c20.close_20 - c20.min_low_20) / NULLIF(c20.max_high_20 - c20.min_low_20, 0) AS ret_20d,
+                   (c60.close_60 - c60.min_low_60) / NULLIF(c60.max_high_60 - c60.min_low_60, 0) AS ret_60d
             FROM base b
             LEFT JOIN channel_5d c5 ON b.ts_code = c5.ts_code AND b.trade_date = c5.trade_date
             LEFT JOIN channel_20d c20 ON b.ts_code = c20.ts_code AND b.trade_date = c20.trade_date
+            LEFT JOIN channel_60d c60 ON b.ts_code = c60.ts_code AND b.trade_date = c60.trade_date
             WHERE c5.close_5 IS NOT NULL
               AND c20.close_20 IS NOT NULL
+              AND c60.close_60 IS NOT NULL
               AND c5.max_high_5 != c5.min_low_5
               AND c20.max_high_20 != c20.min_low_20
+              AND c60.max_high_60 != c60.min_low_60
               AND {factor_notnull}
         )
-        SELECT ts_code, trade_date, ret_5d, ret_20d, {factor_select}
+        SELECT ts_code, trade_date, ret_5d, ret_20d, ret_60d, {factor_select}
         FROM labeled
         ORDER BY trade_date
         """
@@ -204,6 +225,8 @@ class DatasetBuilder:
             y_val_5=merged.loc[val_mask, "ret_5d"].reset_index(drop=True),
             y_train_20=merged.loc[train_mask, "ret_20d"].reset_index(drop=True),
             y_val_20=merged.loc[val_mask, "ret_20d"].reset_index(drop=True),
+            y_train_60=merged.loc[train_mask, "ret_60d"].reset_index(drop=True),
+            y_val_60=merged.loc[val_mask, "ret_60d"].reset_index(drop=True),
             train_dates=merged.loc[train_mask, "trade_date"].reset_index(drop=True),
             val_dates=merged.loc[val_mask, "trade_date"].reset_index(drop=True),
             train_codes=merged.loc[train_mask, "ts_code"].reset_index(drop=True),
