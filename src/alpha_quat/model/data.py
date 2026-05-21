@@ -82,9 +82,10 @@ class DatasetBuilder:
         if stock_st_dir.exists() and list(stock_st_dir.glob("*.parquet")):
             stock_st_path = str(stock_st_dir / "*.parquet")
             st_clause = f"""st_codes AS (
-            SELECT DISTINCT ts_code, trade_date
-            FROM read_parquet('{stock_st_path}', hive_partitioning=false)
-            WHERE trade_date >= '{all_start}'
+            SELECT DISTINCT CAST(ts_code AS VARCHAR) AS ts_code,
+                   CAST(trade_date AS VARCHAR) AS trade_date
+            FROM read_parquet('{stock_st_path}', hive_partitioning=false, union_by_name=true)
+            WHERE CAST(trade_date AS VARCHAR) >= '{all_start}'
         ),"""
             st_join = """LEFT JOIN st_codes s ON d.ts_code = s.ts_code AND d.trade_date = s.trade_date
             WHERE s.ts_code IS NULL"""
