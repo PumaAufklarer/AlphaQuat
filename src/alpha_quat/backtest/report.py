@@ -127,7 +127,7 @@ def _make_drawdown_chart(nav, dates):
 
 def _build_trade_table(trades):
     rows = []
-    for t in trades[:200]:
+    for t in trades:
         pnl_str = f"{t['pnl']:+.2f}"
         color = "green" if t["pnl"] > 0 else ("red" if t["pnl"] < 0 else "gray")
         rows.append(
