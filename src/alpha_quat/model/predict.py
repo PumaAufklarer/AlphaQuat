@@ -87,6 +87,21 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
             f"{r['s5']:.3f} {r['s20']:.3f} {r['s60']:.3f} {r['score']:.3f}"
         )
 
+    # Bottom-K
+    print()
+    print(f"=== BOTTOM {top_k} ===")
+    print(
+        f"{'':>3} {'代码':>10} {'名称':>8}  {'5d':>6} {'20d':>6} {'60d':>6} {'综合':>6}"
+    )
+    print("-" * 54)
+    n = len(features)
+    for i in range(min(top_k, n)):
+        r = features.iloc[n - 1 - i]
+        print(
+            f"  {i + 1:>2} {r['ts_code']:>10} {str(r.get('name', ''))[:8]:>8}  "
+            f"{r['s5']:.3f} {r['s20']:.3f} {r['s60']:.3f} {r['score']:.3f}"
+        )
+
     # Current holdings
     if holdings:
         print()
