@@ -98,23 +98,72 @@ def _build_backtest_parser(subparsers):
     return parser
 
 
-def _cmd_fetch(args, config, metadata):
+def _build_predict_parser(subparsers):
+    parser = subparsers.add_parser(
+        "predict", help="Pull data, score stocks, show top picks"
+    )
+    parser.add_argument("--holdings", default=None, help="Path to holdings YAML file")
+    parser.add_argument(
+        "--top-k", type=int, default=10, help="Number of top picks to show"
+    )
+    return parser
+
+
+def _cmd_predict(args, config):
+    from alpha_quat.model.predict import predict as run_predict
+
+    logger = logging.getLogger(__name__)
+
+    # Fetch latest data
+    from alpha_quat.data.fetcher import Fetcher
+    from alpha_quat.data.pipeline import Pipeline
+    from alpha_quat.data.writer import ParquetWriter
+    from alpha_quat.data.sources.daily import DailySource
+    from alpha_quat.data.sources.daily_basic import DailyBasicSource
+
     fetcher = Fetcher(token=config.token)
     writer = ParquetWriter()
+
+    db_path = config.data_dir / "registry.db"
+    from alpha_quat.data.metadata import MetadataManager
+
+    metadata = MetadataManager(str(db_path))
+
     pipeline = Pipeline(
         data_dir=config.data_dir, fetcher=fetcher, metadata=metadata, writer=writer
     )
-    names = list(ALL_SOURCES.keys()) if "all" in args.sources else args.sources
-    sources = [ALL_SOURCES[name]() for name in names]
-    pipeline.run(sources)
+    logger.info("Pulling daily and daily_basic data...")
+    pipeline.run([DailySource(), DailyBasicSource()])
 
-    print()
-    summary_rows = metadata.summary()
-    if summary_rows:
-        print(f"{'api_name':<15} {'count':<8} {'max_date'}")
-        print("-" * 40)
-        for row in summary_rows:
-            print(f"{row[0]:<15} {row[1]:<8} {row[2] or 'N/A'}")
+    # Compute features (incremental)
+    from alpha_quat.features.engine import FeatureEngine
+    from alpha_quat.features.pipeline import FeaturePipeline
+    from alpha_quat.features.alphasets.alpha158 import build_alpha158
+
+    engine = FeatureEngine(data_dir=config.data_dir)
+    output_dir = config.data_dir / "features"
+    feat_pipeline = FeaturePipeline(
+        data_dir=config.data_dir,
+        output_dir=output_dir,
+        engine=engine,
+        writer=writer,
+        metadata=metadata,
+    )
+    registry = build_alpha158()
+    logger.info("Computing features...")
+    feat_pipeline.run(registry)
+
+    # Load holdings
+    holdings = None
+    if args.holdings:
+        import yaml
+
+        with open(args.holdings) as f:
+            data = yaml.safe_load(f)
+        holdings = data.get("holdings", [])
+
+    # Predict
+    run_predict(config.data_dir, holdings=holdings, top_k=args.top_k)
 
 
 def _cmd_feature(args, config, metadata):
@@ -242,6 +291,34 @@ def _cmd_model(args, config):
         print("Available: lightgbm")
 
 
+def _cmd_fetch(args, config, metadata):
+    from alpha_quat.data.fetcher import Fetcher
+    from alpha_quat.data.pipeline import Pipeline
+    from alpha_quat.data.writer import ParquetWriter
+    from alpha_quat.data.sources.stock_basic import StockBasicSource
+    from alpha_quat.data.sources.trade_cal import TradeCalSource
+    from alpha_quat.data.sources.stock_st import StockStSource
+    from alpha_quat.data.sources.daily import DailySource
+    from alpha_quat.data.sources.daily_basic import DailyBasicSource
+
+    fetcher = Fetcher(token=config.token)
+    writer = ParquetWriter()
+    pipeline = Pipeline(
+        data_dir=config.data_dir, fetcher=fetcher, metadata=metadata, writer=writer
+    )
+    names = list(ALL_SOURCES.keys()) if "all" in args.sources else args.sources
+    sources = [ALL_SOURCES[name]() for name in names]
+    pipeline.run(sources)
+
+    print()
+    summary_rows = metadata.summary()
+    if summary_rows:
+        print(f"{'api_name':<15} {'count':<8} {'max_date'}")
+        print("-" * 40)
+        for row in summary_rows:
+            print(f"{row[0]:<15} {row[1]:<8} {row[2] or 'N/A'}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="alpha-quat: stock data fetching and feature engineering"
@@ -261,6 +338,7 @@ def main():
     _build_feature_parser(subparsers)
     _build_backtest_parser(subparsers)
     _build_model_parser(subparsers)
+    _build_predict_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -292,5 +370,7 @@ def main():
         _cmd_backtest(args, config)
     elif args.command == "model":
         _cmd_model(args, config)
+    elif args.command == "predict":
+        _cmd_predict(args, config)
     else:
         _cmd_fetch(args, config, metadata)
