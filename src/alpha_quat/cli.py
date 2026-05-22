@@ -95,6 +95,17 @@ def _build_backtest_parser(subparsers):
         default=0.40,
         help="Sell stocks outside Top-K only if score < threshold (default 0.40)",
     )
+    parser.add_argument(
+        "--daily-monitor",
+        action="store_true",
+        help="Enable daily monitoring mode (sell weak, buy best)",
+    )
+    parser.add_argument(
+        "--sell-score-percentile",
+        type=float,
+        default=None,
+        help="Sell holdings scoring below this percentile (e.g. 0.50=below median)",
+    )
     return parser
 
 
@@ -212,6 +223,8 @@ def _cmd_backtest(args, config):
         model_dir=str(model_dir) if args.model_dir or model_dir.exists() else None,
         rebalance_interval=args.rebalance_interval,
         sell_threshold=args.sell_threshold,
+        daily_monitor=args.daily_monitor,
+        sell_score_percentile=args.sell_score_percentile,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()

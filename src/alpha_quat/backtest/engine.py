@@ -171,11 +171,87 @@ class BacktestEngine:
             features = features.loc[features["ts_code"].isin(list(universe))]
 
             if self.config.model_dir:
-                ml_is_rebalance = (
+                if self.config.daily_monitor:
+                    # Daily monitoring: score → check holdings → sell weak → buy best
+                    ctx_sig = StrategyContext(
+                        trade_date=td, capital=self.portfolio.total_value(close_px)
+                    )
+                    signal_result = self.signal_gen.generate(features, ctx_sig)
+                    scores_map = dict(
+                        zip(
+                            signal_result.signals["ts_code"],
+                            signal_result.signals["score"],
+                        )
+                    )
+
+                    # Determine score threshold for sell
+                    all_scores = signal_result.signals["score"]
+                    score_cut = None
+                    if self.config.sell_score_percentile is not None:
+                        score_cut = all_scores.quantile(
+                            1 - self.config.sell_score_percentile
+                        )
+                        if isinstance(score_cut, pd.Series):
+                            score_cut = float(score_cut.iloc[0])
+                        else:
+                            score_cut = float(score_cut)
+
+                    sell_codes = []
+                    buy_codes = []
+                    for code, h in list(self.portfolio.holdings.items()):
+                        px = close_px.get(code)
+                        # Dynamic stop-loss
+                        if px and px < h.peak_price * (1 - self.config.stop_loss_pct):
+                            sell_codes.append(code)
+                            continue
+                        # Score percentile
+                        if score_cut is not None:
+                            sc = scores_map.get(code, 0)
+                            if sc < score_cut:
+                                sell_codes.append(code)
+
+                    # Buy: highest-scored stock not already held
+                    current_set = set(self.portfolio.holdings.keys()) - set(sell_codes)
+                    for code in signal_result.signals["ts_code"]:
+                        if code not in current_set and code not in sell_codes:
+                            buy_codes.append(code)
+                            if len(buy_codes) >= self.config.top_k - len(current_set):
+                                break
+
+                    # Ensure we have at least initial top_k positions
+                    if (
+                        self._last_rebalance_idx is None
+                        and len(current_set) < self.config.top_k
+                    ):
+                        needed = self.config.top_k - len(current_set)
+                        for code in signal_result.signals["ts_code"]:
+                            if (
+                                code not in current_set
+                                and code not in buy_codes
+                                and code not in sell_codes
+                            ):
+                                buy_codes.append(code)
+                                if len(buy_codes) >= needed:
+                                    break
+                        self._last_rebalance_idx = idx
+
+                    if sell_codes or buy_codes:
+                        sig_df = pd.DataFrame(
+                            {
+                                "ts_code": buy_codes + sell_codes,
+                                "score": [1.0] * len(buy_codes)
+                                + [0.0] * len(sell_codes),
+                                "action": ["buy"] * len(buy_codes)
+                                + ["sell"] * len(sell_codes),
+                            }
+                        )
+                        self._pending_signals = SignalResult(signals=sig_df)
+                    else:
+                        self._pending_signals = None
+                elif (
                     self._last_rebalance_idx is None
                     or idx - self._last_rebalance_idx >= self.config.rebalance_interval
-                )
-                if ml_is_rebalance:
+                ):
                     self._last_rebalance_idx = idx
                     ctx_sig = StrategyContext(
                         trade_date=td, capital=self.portfolio.total_value(close_px)

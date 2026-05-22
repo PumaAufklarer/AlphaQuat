@@ -19,3 +19,5 @@ class BacktestConfig:
     sell_threshold: float | None = (
         0.40  # None=sell all out-of-top-K; 0.40=only if score<0.40
     )
+    daily_monitor: bool = False
+    sell_score_percentile: float | None = None
