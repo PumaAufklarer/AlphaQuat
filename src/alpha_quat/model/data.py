@@ -56,7 +56,15 @@ class DatasetBuilder:
         all_start = feature_dates[0]
         all_end = feature_dates[-1]
 
-        # Build forward date mapping
+        # Find first actual feature file for column detection
+        sample = None
+        for d in feature_dates:
+            sample_path = self.data_dir / "features" / f"{d}.parquet"
+            if sample_path.exists():
+                sample = pd.read_parquet(sample_path)
+                break
+        if sample is None:
+            raise ValueError("No feature data found in the specified date range")
         date_index = {str(d): i for i, d in enumerate(cal_arr)}  # noqa: F841
         fwd_rows = []
         for i in range(margin_start, margin_end + 1):
@@ -98,8 +106,7 @@ class DatasetBuilder:
             st_clause = ""
             st_join = "WHERE 1=1"
 
-        # Determine factor columns from one sample parquet file
-        sample = pd.read_parquet(self.data_dir / "features" / f"{all_start}.parquet")
+        # Determine factor columns from sample (already loaded above)
         all_factor_cols = [
             c
             for c in sample.columns
