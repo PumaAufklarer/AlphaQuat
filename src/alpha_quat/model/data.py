@@ -65,22 +65,6 @@ class DatasetBuilder:
                 break
         if sample is None:
             raise ValueError("No feature data found in the specified date range")
-        date_index = {str(d): i for i, d in enumerate(cal_arr)}  # noqa: F841
-        fwd_rows = []
-        for i in range(margin_start, margin_end + 1):
-            d = str(cal_arr[i])
-            idx_5 = i + 5
-            idx_20 = i + 20
-            idx_60 = i + 60
-            fwd_5 = str(cal_arr[idx_5]) if idx_5 < len(cal_arr) else None
-            fwd_20 = str(cal_arr[idx_20]) if idx_20 < len(cal_arr) else None
-            fwd_60 = str(cal_arr[idx_60]) if idx_60 < len(cal_arr) else None
-            if fwd_5 is not None and fwd_20 is not None and fwd_60 is not None:
-                fwd_rows.append((d, fwd_5, fwd_20, fwd_60))
-
-        fwd_df = pd.DataFrame(  # noqa: F841
-            fwd_rows, columns=["trade_date", "fwd_5", "fwd_20", "fwd_60"]
-        )
 
         # Read stock_basic for main board filter
         sb = pd.read_parquet(self.data_dir / "stock_basic.parquet")
@@ -128,14 +112,26 @@ class DatasetBuilder:
         daily AS (
             SELECT CAST(ts_code AS VARCHAR) AS ts_code,
                    CAST(trade_date AS VARCHAR) AS trade_date,
-                   CAST(open AS DOUBLE) AS open,
                    CAST(high AS DOUBLE) AS high,
                    CAST(low AS DOUBLE) AS low,
                    CAST(close AS DOUBLE) AS close
             FROM read_parquet('{daily_path}', hive_partitioning=false, union_by_name=true)
             WHERE CAST(trade_date AS VARCHAR) >= '{all_start}'
         ),
-        fwd_map AS (SELECT * FROM fwd_df),
+        daily_win AS (
+            SELECT *,
+                   LEAD(close, 5) OVER w AS close_5,
+                   LEAD(close, 20) OVER w AS close_20,
+                   LEAD(close, 60) OVER w AS close_60,
+                   MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 5 FOLLOWING) AS min_low_5,
+                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 5 FOLLOWING) AS max_high_5,
+                   MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS min_low_20,
+                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS max_high_20,
+                   MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 60 FOLLOWING) AS min_low_60,
+                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 60 FOLLOWING) AS max_high_60
+            FROM daily
+            WINDOW w AS (PARTITION BY ts_code ORDER BY trade_date)
+        ),
         main_board AS (SELECT * FROM main_board),
         {st_clause}
         universe AS (
@@ -149,57 +145,19 @@ class DatasetBuilder:
             FROM features f
             INNER JOIN universe u ON f.ts_code = u.ts_code AND f.trade_date = u.trade_date
         ),
-        channel_5d AS (
-            SELECT b.ts_code, b.trade_date,
-                   MIN(d.low) AS min_low_5,
-                   MAX(d.high) AS max_high_5,
-                   MAX(CASE WHEN d.trade_date = fm.fwd_5 THEN d.close END) AS close_5
-            FROM base b
-            JOIN fwd_map fm ON b.trade_date = fm.trade_date
-            JOIN daily d ON b.ts_code = d.ts_code
-                AND d.trade_date >= b.trade_date
-                AND d.trade_date <= fm.fwd_5
-            GROUP BY b.ts_code, b.trade_date
-        ),
-        channel_20d AS (
-            SELECT b.ts_code, b.trade_date,
-                   MIN(d.low) AS min_low_20,
-                   MAX(d.high) AS max_high_20,
-                   MAX(CASE WHEN d.trade_date = fm.fwd_20 THEN d.close END) AS close_20
-            FROM base b
-            JOIN fwd_map fm ON b.trade_date = fm.trade_date
-            JOIN daily d ON b.ts_code = d.ts_code
-                AND d.trade_date >= b.trade_date
-                AND d.trade_date <= fm.fwd_20
-            GROUP BY b.ts_code, b.trade_date
-        ),
-        channel_60d AS (
-            SELECT b.ts_code, b.trade_date,
-                   MIN(d.low) AS min_low_60,
-                   MAX(d.high) AS max_high_60,
-                   MAX(CASE WHEN d.trade_date = fm.fwd_60 THEN d.close END) AS close_60
-            FROM base b
-            JOIN fwd_map fm ON b.trade_date = fm.trade_date
-            JOIN daily d ON b.ts_code = d.ts_code
-                AND d.trade_date >= b.trade_date
-                AND d.trade_date <= fm.fwd_60
-            GROUP BY b.ts_code, b.trade_date
-        ),
         labeled AS (
             SELECT b.*,
-                   (c5.close_5 - c5.min_low_5) / NULLIF(c5.max_high_5 - c5.min_low_5, 0) AS ret_5d,
-                   (c20.close_20 - c20.min_low_20) / NULLIF(c20.max_high_20 - c20.min_low_20, 0) AS ret_20d,
-                   (c60.close_60 - c60.min_low_60) / NULLIF(c60.max_high_60 - c60.min_low_60, 0) AS ret_60d
+                   (dw.close_5 - dw.min_low_5) / NULLIF(dw.max_high_5 - dw.min_low_5, 0) AS ret_5d,
+                   (dw.close_20 - dw.min_low_20) / NULLIF(dw.max_high_20 - dw.min_low_20, 0) AS ret_20d,
+                   (dw.close_60 - dw.min_low_60) / NULLIF(dw.max_high_60 - dw.min_low_60, 0) AS ret_60d
             FROM base b
-            LEFT JOIN channel_5d c5 ON b.ts_code = c5.ts_code AND b.trade_date = c5.trade_date
-            LEFT JOIN channel_20d c20 ON b.ts_code = c20.ts_code AND b.trade_date = c20.trade_date
-            LEFT JOIN channel_60d c60 ON b.ts_code = c60.ts_code AND b.trade_date = c60.trade_date
-            WHERE c5.close_5 IS NOT NULL
-              AND c20.close_20 IS NOT NULL
-              AND c60.close_60 IS NOT NULL
-              AND c5.max_high_5 != c5.min_low_5
-              AND c20.max_high_20 != c20.min_low_20
-              AND c60.max_high_60 != c60.min_low_60
+            LEFT JOIN daily_win dw ON b.ts_code = dw.ts_code AND b.trade_date = dw.trade_date
+            WHERE dw.close_5 IS NOT NULL
+              AND dw.close_20 IS NOT NULL
+              AND dw.close_60 IS NOT NULL
+              AND dw.max_high_5 != dw.min_low_5
+              AND dw.max_high_20 != dw.min_low_20
+              AND dw.max_high_60 != dw.min_low_60
               AND {factor_notnull}
         )
         SELECT ts_code, trade_date, ret_5d, ret_20d, ret_60d, {factor_select}
