@@ -1,7 +1,13 @@
 import math
 
 
-def compute_metrics(snapshots, trades, total_invested, risk_free_rate=0.025):
+def compute_metrics(
+    snapshots,
+    trades,
+    total_invested,
+    risk_free_rate=0.025,
+    additions: dict[str, float] | None = None,
+):
     if not snapshots:
         return {
             "cumulative_return": 0.0,
@@ -15,12 +21,27 @@ def compute_metrics(snapshots, trades, total_invested, risk_free_rate=0.025):
             "total_invested": total_invested,
         }
 
+    if additions is None:
+        additions = {}
+
     final_value = snapshots[-1]["total_value"]
     cumulative_return = (
         (final_value - total_invested) / total_invested if total_invested > 0 else 0.0
     )
 
     n_dates = len(snapshots)
+
+    # Time-weighted return: compound adjusted daily returns
+    daily_returns = []
+    for i in range(1, len(snapshots)):
+        prev_tv = snapshots[i - 1]["total_value"]
+        curr_tv = snapshots[i]["total_value"]
+        date = snapshots[i]["date"]
+        addition = additions.get(date, 0)
+        if prev_tv > 0:
+            adjusted_curr = curr_tv - addition
+            daily_returns.append(adjusted_curr / prev_tv - 1.0)
+
     if n_dates >= 2 and total_invested > 0 and final_value > 0:
         years = n_dates / 252.0
         annualized_return = (final_value / total_invested) ** (1.0 / years) - 1.0
@@ -38,13 +59,6 @@ def compute_metrics(snapshots, trades, total_invested, risk_free_rate=0.025):
         if dd < max_drawdown:
             max_drawdown = dd
             max_drawdown_date = s["date"]
-
-    daily_returns = []
-    for i in range(1, len(snapshots)):
-        prev_tv = snapshots[i - 1]["total_value"]
-        curr_tv = snapshots[i]["total_value"]
-        if prev_tv > 0:
-            daily_returns.append(curr_tv / prev_tv - 1.0)
 
     if len(daily_returns) >= 2:
         mean_ret = sum(daily_returns) / len(daily_returns)

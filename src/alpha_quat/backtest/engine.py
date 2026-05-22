@@ -38,6 +38,7 @@ class BacktestEngine:
         self._pending_signals = None
         self._total_invested = config.initial_capital
         self._last_rebalance_idx: int | None = None
+        self._additions: dict[str, float] = {}  # date -> capital added
 
     def run(self):
         cal_path = self.data_dir / "trade_cal.parquet"
@@ -73,6 +74,9 @@ class BacktestEngine:
                 if idx > 0:
                     self.portfolio.cash += self.config.monthly_addition
                     self._total_invested += self.config.monthly_addition
+                    self._additions[td] = (
+                        self._additions.get(td, 0) + self.config.monthly_addition
+                    )
 
             daily_path = self.data_dir / "daily" / f"{_ymd_to_path(td)}.parquet"
             if not daily_path.exists():
@@ -215,6 +219,7 @@ class BacktestEngine:
             snapshots=self.portfolio.snapshots,
             trades=self.portfolio.trades,
             total_invested=self._total_invested,
+            additions=self._additions,
         )
         return {
             "snapshots": self.portfolio.snapshots,
