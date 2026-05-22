@@ -84,6 +84,7 @@ uv run alpha-quat feature --since 20260101            # recompute from date onwa
 uv run alpha-quat backtest                            # run backtest with defaults
 uv run alpha-quat model lightgbm --no-tune            # train LightGBM (5d/20d/60d)
 uv run alpha-quat model lightgbm --trials 50          # train with Optuna tuning
+uv run alpha-quat predict --top-k 10 --holdings data/holdings.yaml  # pull data, score, show picks
 uv run alpha-quat --summary                           # show registry status
 ```
 
@@ -134,6 +135,7 @@ data/
 | `lightgbm/train.py` | `LightGBMTrainer` — native `lgb.train` with optional Optuna tuning (TimeSeriesSplit CV, minimize MSE) |
 | `lightgbm/evaluate.py` | `LightGBMEvaluator` — MSE/MAE, per-date Spearman Rank IC, ICIR, feature importance (gain) top5/bottom5 |
 | `lightgbm/pipeline.py` | `LightGBMPipeline` — orchestrator: build → train 3 models → evaluate → save models + results.json |
+| `predict.py` | `predict()` — daily inference: load models + latest features, score universe, show top-K and holdings ranking |
 
 **Labels:** Channel position — `(close_{t+n} - min_low_{t:t+n}) / (max_high_{t:t+n} - min_low_{t:t+n})`. Values in [0,1]. Computed via LEAD + MIN/MAX window functions (O(n)), NOT range joins.
 
@@ -146,6 +148,7 @@ data/
 - **Feature rebuild before model** — new factors require `uv run alpha-quat feature --rebuild` before training.
 - **--rebuild --since combo** — now works: `--rebuild --since 20180101` clears old files then computes from 2018 onward.
 - **max_offset=60** for 60d labels — needs 60 extra trading days of daily data for LEAD(close,60).
+- **Holdings YAML** — `data/holdings.yaml` stores current portfolio with ts_code, shares, avg_cost. Used by `alpha-quat predict`.
 
 ## Architecture: strategy (`src/alpha_quat/strategy/`)
 
@@ -191,19 +194,24 @@ StrategyResult(target_positions, orders, metadata)
 
 | Module | Purpose |
 |--------|---------|
-| `config.py` | `BacktestConfig` dataclass — start/end dates, capital, monthly_addition, commission, stop_loss, top_k, factor names |
+| `config.py` | `BacktestConfig` dataclass — start/end dates, capital, monthly_addition, commission, stop_loss, top_k, model_dir, rebalance_interval, sell_threshold, daily_monitor, sell_score_percentile |
 | `filters.py` | `build_universe(date, data_dir)` — filters to main board (`stock_basic.market == "主板"`) excluding ST stocks |
-| `portfolio.py` | `Portfolio` — cash, holdings (100-share lots), snapshots, trade log. `buy()`/`sell()` with commission |
-| `engine.py` | `BacktestEngine` — day-by-day loop: monthly addition, stop loss, T+1 open execution, mark-to-market |
-| `metrics.py` | `compute_metrics()` — cumulative/annualized return, max drawdown, Sharpe, win rate |
+| `portfolio.py` | `Portfolio` — cash, holdings (100-share lots), snapshots, trade log. `buy()`/`sell()` with commission. `update_peak_prices()` for dynamic stop-loss |
+| `engine.py` | `BacktestEngine` — day-by-day loop: monthly addition, dynamic stop-loss (peak-price based), graded sell, T+1 open execution. Supports both MACross and ML signal modes |
+| `metrics.py` | `compute_metrics()` — cumulative/annualized return, max drawdown, Sharpe, win rate. Adjusts for capital additions in daily returns |
 | `report.py` | `generate_html_report()` — self-contained HTML with matplotlib charts (base64 embedded) |
 
-**Timing model:** Signal at close of day T (from `features/YYYYMMDD.parquet`) → execute at open of day T+1. Stop loss checked at T-1 close → sell at T open.
+**Timing model:** Signal at close of day T (from `features/YYYYMMDD.parquet`) → execute at open of day T+1. Stop loss checked at T-1 close → sell at T open. Dynamic stop-loss uses peak price since purchase (not entry cost).
 
 **Engine does NOT use `Strategy.run()`** — calls `ISignalGenerator.generate()` at EOD and `IPositionManager` methods at next open, bypassing the synchronous `Strategy.run()` chain. This is required for T+1 execution timing.
 
+**Rebalance modes (ML):**
+- `rebalance_interval=N` — rebalance every N trading days (5=weekly, 10=bi-weekly). On rebalance day: compute target=Top-K, sell stocks outside Top-K with score < sell_threshold (default 0.40).
+- `--daily-monitor` — continuous daily mode. Score daily → sell holdings below sell_score_percentile (e.g. 0.20 = bottom 20%) or hit stop-loss → buy highest-scored not-held stock.
+
 **Existing strategy implementations:**
 - `strategy/signals/ma_cross.py` — `MACrossSignal`: golden/dead cross detection via `KLEN35`/`KLEN36` factors
+- `strategy/signals/ml_signal.py` — `MLSignalGenerator`: ensemble of 3 LightGBM models (5d/20d/60d), ICIR-weighted score
 - `strategy/positions/equal_weight.py` — `EqualWeightTopKPosition`: top-K equal weight allocation with share lot rounding
 
 ### Data gotchas
@@ -211,6 +219,7 @@ StrategyResult(target_positions, orders, metadata)
 - **stock_st schema inconsistency** — some files have VARCHAR ts_code, others INTEGER. Always use `read_parquet(..., union_by_name=true)` + explicit `CAST(ts_code AS VARCHAR)` when reading stock_st. Same for daily parquet across different years.
 - **features path uses YYYYMMDD (no dashes)** — unlike daily/ which uses hive-style `YYYY_MM_DD`. `BacktestEngine` and `DatasetBuilder` read `features/{trade_date}.parquet` where trade_date is `20240115` not `2024_01_15`.
 - **Must run fetch+feature before backtest/model** — `engine.py` and `data.py` read from `data/` subdirectories. All must exist.
+- **matplotlib is a required dep** — added for HTML report charts. Listed in `pyproject.toml`.
 - **matplotlib is a required dep** — added for HTML report charts. Listed in `pyproject.toml`.
 
 ## Adding a new data source
