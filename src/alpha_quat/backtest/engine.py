@@ -187,7 +187,23 @@ class BacktestEngine:
                     )["ts_code"].tolist()
                     current_codes = list(self.portfolio.holdings.keys())
                     buy_codes = [c for c in top_codes if c not in current_codes]
-                    sell_codes = [c for c in current_codes if c not in top_codes]
+
+                    # Graded sell: only sell stocks outside Top-K if score < threshold
+                    scores_map = dict(
+                        zip(
+                            signal_result.signals["ts_code"],
+                            signal_result.signals["score"],
+                        )
+                    )
+                    sell_codes = []
+                    for code in current_codes:
+                        if code not in top_codes:
+                            sc = scores_map.get(code, 0)
+                            if (
+                                self.config.sell_threshold is None
+                                or sc < self.config.sell_threshold
+                            ):
+                                sell_codes.append(code)
 
                     if sell_codes or buy_codes:
                         sig_df = pd.DataFrame(

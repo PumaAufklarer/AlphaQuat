@@ -89,6 +89,12 @@ def _build_backtest_parser(subparsers):
         default=5,
         help="Trading days between rebalances (5=weekly, 10=bi-weekly)",
     )
+    parser.add_argument(
+        "--sell-threshold",
+        type=float,
+        default=0.40,
+        help="Sell stocks outside Top-K only if score < threshold (default 0.40)",
+    )
     return parser
 
 
@@ -156,6 +162,7 @@ def _cmd_backtest(args, config):
         top_k=args.top_k,
         model_dir=str(model_dir) if args.model_dir or model_dir.exists() else None,
         rebalance_interval=args.rebalance_interval,
+        sell_threshold=args.sell_threshold,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()

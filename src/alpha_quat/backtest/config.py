@@ -15,6 +15,7 @@ class BacktestConfig:
     top_k: int = 5
     benchmark: str | None = None
     model_dir: str | None = None
-    rebalance_interval: int = (
-        5  # trading days between rebalances (5=weekly, 10=bi-weekly)
+    rebalance_interval: int = 5  # trading days between rebalances
+    sell_threshold: float | None = (
+        0.40  # None=sell all out-of-top-K; 0.40=only if score<0.40
     )
