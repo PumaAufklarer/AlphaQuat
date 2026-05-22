@@ -366,22 +366,29 @@ _FACTORS = [
     # === Fundamental factors (valuation, size, liquidity) ===
     Factor(
         name="PE_TTM",
-        expression="$pe_ttm",
+        expression="($pe_ttm - MIN($pe_ttm, 750)) / (MAX($pe_ttm, 750) - MIN($pe_ttm, 750))",
         category="fundamental",
     ),
     Factor(
         name="PB",
-        expression="$pb",
+        expression="($pb - MIN($pb, 750)) / (MAX($pb, 750) - MIN($pb, 750))",
         category="fundamental",
     ),
+    # ROE intermediate: raw ratio (used by ROE TS below)
     Factor(
-        name="ROE",
+        name="ROE_RAW",
         expression="$pb / NULLIF($pe_ttm, 0)",
         category="fundamental",
     ),
     Factor(
-        name="LOG_MV",
-        expression="LOG($total_mv)",
+        name="ROE",
+        expression="(ROE_RAW - MIN(ROE_RAW, 750)) / (MAX(ROE_RAW, 750) - MIN(ROE_RAW, 750))",
+        depends_on=["ROE_RAW"],
+        category="fundamental",
+    ),
+    Factor(
+        name="MV",
+        expression="($total_mv - MIN($total_mv, 750)) / (MAX($total_mv, 750) - MIN($total_mv, 750))",
         category="fundamental",
     ),
     Factor(

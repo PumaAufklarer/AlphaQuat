@@ -56,4 +56,4 @@ class TestAlpha158:
         reg = build_alpha158()
         lookback = reg.min_lookback()
         assert lookback >= 0
-        assert lookback <= 60
+        assert lookback <= 750

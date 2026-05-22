@@ -37,7 +37,9 @@ class FeatureEngine:
 
         factors = registry.topological_order()
         lookback = registry.min_lookback()
-        margin = lookback + 5
+        margin = int(
+            (lookback + 5) * 365 / 252
+        )  # convert trading days to calendar days
 
         min_date = min(trade_dates)
         max_date = max(trade_dates)
