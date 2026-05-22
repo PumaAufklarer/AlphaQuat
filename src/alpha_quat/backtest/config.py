@@ -14,3 +14,5 @@ class BacktestConfig:
     long_factor: str = "KLEN36"
     top_k: int = 5
     benchmark: str | None = None
+    model_dir: str | None = None
+    rebalance_weekday: int = 4  # 0=Mon..6=Sun, 4=Fri close → Mon open

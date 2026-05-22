@@ -80,6 +80,15 @@ def _build_backtest_parser(subparsers):
     parser.add_argument("--stop-loss", type=float, default=0.15, help="Stop loss pct")
     parser.add_argument("--top-k", type=int, default=5, help="Max holdings")
     parser.add_argument("--output", default=None, help="HTML report output path")
+    parser.add_argument(
+        "--model-dir", default=None, help="Path to model directory for ML backtest"
+    )
+    parser.add_argument(
+        "--rebalance-weekday",
+        type=int,
+        default=4,
+        help="Rebalance weekday 0=Mon..6=Sun (default 4=Fri)",
+    )
     return parser
 
 
@@ -135,6 +144,8 @@ def _cmd_feature(args, config, metadata):
 
 
 def _cmd_backtest(args, config):
+    model_dir = args.model_dir or config.data_dir / "models"
+
     cfg = BacktestConfig(
         start_date=args.start,
         end_date=args.end,
@@ -143,6 +154,8 @@ def _cmd_backtest(args, config):
         commission_rate=args.commission,
         stop_loss_pct=args.stop_loss,
         top_k=args.top_k,
+        model_dir=str(model_dir) if args.model_dir or model_dir.exists() else None,
+        rebalance_weekday=args.rebalance_weekday,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()

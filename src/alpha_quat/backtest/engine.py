@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -7,8 +8,9 @@ from alpha_quat.backtest.config import BacktestConfig
 from alpha_quat.backtest.filters import build_universe
 from alpha_quat.backtest.portfolio import Portfolio
 from alpha_quat.backtest.metrics import compute_metrics
-from alpha_quat.strategy.types import StrategyContext
+from alpha_quat.strategy.types import SignalResult, StrategyContext
 from alpha_quat.strategy.signals.ma_cross import MACrossSignal
+from alpha_quat.strategy.signals.ml_signal import MLSignalGenerator
 from alpha_quat.strategy.positions.equal_weight import EqualWeightTopKPosition
 
 logger = logging.getLogger(__name__)
@@ -23,12 +25,26 @@ class BacktestEngine:
         self.config = config
         self.data_dir = data_dir
         self.portfolio = Portfolio(cash=config.initial_capital)
-        self.signal_gen = MACrossSignal(
-            short_factor=config.short_factor, long_factor=config.long_factor
-        )
+
+        if config.model_dir:
+            self.signal_gen = MLSignalGenerator(
+                Path(config.model_dir), top_k=config.top_k
+            )
+        else:
+            self.signal_gen = MACrossSignal(
+                short_factor=config.short_factor, long_factor=config.long_factor
+            )
+
         self.position_mgr = EqualWeightTopKPosition(top_k=config.top_k)
         self._pending_signals = None
         self._total_invested = config.initial_capital
+        self._last_rebalance_date: str | None = None
+
+    def _is_rebalance_day(self, trade_date: str) -> bool:
+        if not self.config.model_dir:
+            return True
+        dt = datetime.strptime(trade_date, "%Y%m%d")
+        return dt.weekday() == self.config.rebalance_weekday
 
     def run(self):
         cal_path = self.data_dir / "trade_cal.parquet"
@@ -50,8 +66,12 @@ class BacktestEngine:
             return self._result()
 
         tracked_months: set[str] = set()
-        self.signal_gen._prev = None
+
+        if not self.config.model_dir:
+            self.signal_gen._prev = None  # type: ignore[attr-defined]
+
         self._pending_signals = None
+        self._last_rebalance_date = None
 
         for idx, td in enumerate(dates):
             month_key = td[:6]
@@ -94,7 +114,7 @@ class BacktestEngine:
                 sig_df = self._pending_signals.signals
                 sig_df = sig_df.loc[sig_df["ts_code"].isin(list(universe))]
 
-                prices_df: pd.DataFrame = daily[["ts_code", "open"]].copy()  # type: ignore[assignment]
+                prices_df: pd.DataFrame = daily[["ts_code", "open"]]  # type: ignore[assignment]
                 ctx = StrategyContext(
                     trade_date=td,
                     capital=self.portfolio.total_value(open_px),
@@ -104,7 +124,7 @@ class BacktestEngine:
 
                 buy_sigs = sig_df.loc[sig_df["action"] == "buy"]
                 if not buy_sigs.empty:
-                    fake_result = type(self._pending_signals)(
+                    fake_result = SignalResult(
                         signals=buy_sigs.reset_index(drop=True),
                         metadata=self._pending_signals.metadata,
                     )
@@ -141,15 +161,48 @@ class BacktestEngine:
                             )
 
             feat_path = self.data_dir / "features" / f"{td}.parquet"
-            if feat_path.exists():
-                features = pd.read_parquet(feat_path)
-                features = features.loc[features["ts_code"].isin(list(universe))]
+            if not feat_path.exists():
+                self._pending_signals = None
+                self.portfolio.record_snapshot(td, close_px)
+                continue
+
+            features = pd.read_parquet(feat_path)
+            features = features.loc[features["ts_code"].isin(list(universe))]
+
+            if self.config.model_dir:
+                if self._is_rebalance_day(td):
+                    ctx_sig = StrategyContext(
+                        trade_date=td, capital=self.portfolio.total_value(close_px)
+                    )
+                    signal_result = self.signal_gen.generate(features, ctx_sig)
+
+                    top_codes = signal_result.signals.nlargest(
+                        self.config.top_k, "score"
+                    )["ts_code"].tolist()
+                    current_codes = list(self.portfolio.holdings.keys())
+                    buy_codes = [c for c in top_codes if c not in current_codes]
+                    sell_codes = [c for c in current_codes if c not in top_codes]
+
+                    if sell_codes or buy_codes:
+                        sig_df = pd.DataFrame(
+                            {
+                                "ts_code": buy_codes + sell_codes,
+                                "score": [1.0] * len(buy_codes)
+                                + [0.0] * len(sell_codes),
+                                "action": ["buy"] * len(buy_codes)
+                                + ["sell"] * len(sell_codes),
+                            }
+                        )
+                        self._pending_signals = SignalResult(signals=sig_df)
+                    else:
+                        self._pending_signals = None
+                else:
+                    self._pending_signals = None
+            else:
                 ctx_sig = StrategyContext(
                     trade_date=td, capital=self.portfolio.total_value(close_px)
                 )
                 self._pending_signals = self.signal_gen.generate(features, ctx_sig)
-            else:
-                self._pending_signals = None
 
             self.portfolio.record_snapshot(td, close_px)
 
