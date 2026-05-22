@@ -9,6 +9,7 @@ class Holding:
     shares: int
     avg_cost: float
     buy_date: str
+    peak_price: float = 0.0
 
 
 class Portfolio:
@@ -53,10 +54,15 @@ class Portfolio:
                 shares=total_shares,
                 avg_cost=new_avg,
                 buy_date=trade_date,
+                peak_price=max(old.peak_price, price),
             )
         else:
             self.holdings[ts_code] = Holding(
-                ts_code=ts_code, shares=lots, avg_cost=price, buy_date=trade_date
+                ts_code=ts_code,
+                shares=lots,
+                avg_cost=price,
+                buy_date=trade_date,
+                peak_price=price,
             )
         self.trades.append(
             {
@@ -117,6 +123,12 @@ class Portfolio:
 
     def total_value(self, prices):
         return self.cash + self.market_value(prices)
+
+    def update_peak_prices(self, prices: dict[str, float]):
+        for code, h in self.holdings.items():
+            px = prices.get(code)
+            if px is not None and px > h.peak_price:
+                h.peak_price = px
 
     def record_snapshot(self, date, prices):
         mv = self.market_value(prices)

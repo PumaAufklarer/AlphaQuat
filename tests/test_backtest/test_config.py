@@ -15,6 +15,8 @@ class TestBacktestConfig:
         assert cfg.long_factor == "KLEN36"
         assert cfg.top_k == 5
         assert cfg.benchmark is None
+        assert cfg.model_dir is None
+        assert cfg.rebalance_interval == 5
 
     def test_custom_values(self):
         cfg = BacktestConfig(

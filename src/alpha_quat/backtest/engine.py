@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -38,13 +37,7 @@ class BacktestEngine:
         self.position_mgr = EqualWeightTopKPosition(top_k=config.top_k)
         self._pending_signals = None
         self._total_invested = config.initial_capital
-        self._last_rebalance_date: str | None = None
-
-    def _is_rebalance_day(self, trade_date: str) -> bool:
-        if not self.config.model_dir:
-            return True
-        dt = datetime.strptime(trade_date, "%Y%m%d")
-        return dt.weekday() == self.config.rebalance_weekday
+        self._last_rebalance_idx: int | None = None
 
     def run(self):
         cal_path = self.data_dir / "trade_cal.parquet"
@@ -71,7 +64,7 @@ class BacktestEngine:
             self.signal_gen._prev = None  # type: ignore[attr-defined]
 
         self._pending_signals = None
-        self._last_rebalance_date = None
+        self._last_rebalance_idx = None
 
         for idx, td in enumerate(dates):
             month_key = td[:6]
@@ -91,9 +84,13 @@ class BacktestEngine:
             close_px = dict(zip(daily["ts_code"], daily["close"]))
             universe = build_universe(td, self.data_dir)
 
+            # Update peak prices for dynamic stop-loss
+            self.portfolio.update_peak_prices(close_px)
+
+            # Dynamic stop-loss: sell if close < peak_price * (1 - stop_loss_pct)
             for code, h in list(self.portfolio.holdings.items()):
                 prev_close = close_px.get(code)
-                if prev_close and prev_close < h.avg_cost * (
+                if prev_close and prev_close < h.peak_price * (
                     1.0 - self.config.stop_loss_pct
                 ):
                     px = open_px.get(code)
@@ -170,7 +167,12 @@ class BacktestEngine:
             features = features.loc[features["ts_code"].isin(list(universe))]
 
             if self.config.model_dir:
-                if self._is_rebalance_day(td):
+                ml_is_rebalance = (
+                    self._last_rebalance_idx is None
+                    or idx - self._last_rebalance_idx >= self.config.rebalance_interval
+                )
+                if ml_is_rebalance:
+                    self._last_rebalance_idx = idx
                     ctx_sig = StrategyContext(
                         trade_date=td, capital=self.portfolio.total_value(close_px)
                     )

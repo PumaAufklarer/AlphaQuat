@@ -15,4 +15,6 @@ class BacktestConfig:
     top_k: int = 5
     benchmark: str | None = None
     model_dir: str | None = None
-    rebalance_weekday: int = 4  # 0=Mon..6=Sun, 4=Fri close → Mon open
+    rebalance_interval: int = (
+        5  # trading days between rebalances (5=weekly, 10=bi-weekly)
+    )

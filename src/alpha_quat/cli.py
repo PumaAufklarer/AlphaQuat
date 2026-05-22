@@ -84,10 +84,10 @@ def _build_backtest_parser(subparsers):
         "--model-dir", default=None, help="Path to model directory for ML backtest"
     )
     parser.add_argument(
-        "--rebalance-weekday",
+        "--rebalance-interval",
         type=int,
-        default=4,
-        help="Rebalance weekday 0=Mon..6=Sun (default 4=Fri)",
+        default=5,
+        help="Trading days between rebalances (5=weekly, 10=bi-weekly)",
     )
     return parser
 
@@ -155,7 +155,7 @@ def _cmd_backtest(args, config):
         stop_loss_pct=args.stop_loss,
         top_k=args.top_k,
         model_dir=str(model_dir) if args.model_dir or model_dir.exists() else None,
-        rebalance_weekday=args.rebalance_weekday,
+        rebalance_interval=args.rebalance_interval,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()
