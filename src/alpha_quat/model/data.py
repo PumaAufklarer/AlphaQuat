@@ -219,8 +219,12 @@ class DatasetBuilder:
             ORDER BY trade_date
             """
 
-        merged = con.execute(query).fetchdf()
+        temp_path = self.data_dir / ".temp_build.parquet"
+        con.execute(f"COPY ({query}) TO '{temp_path}' (FORMAT PARQUET)")
         con.close()
+
+        merged = pd.read_parquet(temp_path)
+        temp_path.unlink()
 
         if merged.empty:
             raise ValueError("No feature data found in the specified date range")
