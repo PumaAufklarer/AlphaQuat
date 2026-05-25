@@ -1,7 +1,6 @@
 """MLSignalGenerator — scores stocks using ensemble of LightGBM models.
 
-Supports regression, quantile, and meta (stacking) modes.
-Meta mode loads 9 base quantile models + meta model for final scoring.
+Detection order: meta → lambdarank → quantile → regression.
 """
 
 import logging
@@ -19,11 +18,41 @@ logger = logging.getLogger(__name__)
 _WEIGHTS = {"5d": 0.35, "20d": 0.32, "60d": 0.33}
 _HORIZONS = ["5d", "20d", "60d"]
 _ALPHAS = [0.1, 0.5, 0.9]
+_ZERO_GAIN = {
+    "KMID94",
+    "KMID95",
+    "KMID96",
+    "KLEN94",
+    "KLEN95",
+    "KLEN96",
+    "KMID97",
+    "KLEN97",
+    "KMID98",
+    "KLEN98",
+    "KMID99",
+    "KLEN99",
+    "KMID100",
+    "KLEN100",
+    "KMID101",
+    "O2C",
+    "DRP",
+    "HLC",
+    "pe_ttm",
+    "pb",
+    "ROE_RAW",
+    "ROE",
+    "MV",
+    "VOLRATIO",
+    "EMA12C",
+    "EMA26C",
+    "MACD",
+    "RSI14",
+    "SLOPE5",
+    "SLOPE20",
+}
 
 
 class MLSignalGenerator(ISignalGenerator):
-    """Scores universe using ensemble of LightGBM models."""
-
     def __init__(self, model_dir: Path, top_k: int = 5):
         self.top_k = top_k
         self.model_dir = Path(model_dir)
@@ -32,161 +61,153 @@ class MLSignalGenerator(ISignalGenerator):
         self.meta_models: dict[str, lgb.Booster] = {}
         self.quantile_mode = False
         self.meta_mode = False
+        self.lambdarank_mode = False
 
-        # Detect meta mode
-        if all((model_dir / f"meta_model_{h}.txt").exists() for h in _HORIZONS):
+        # 1. Meta mode (stacking: needs quantile base models)
+        has_meta = all((model_dir / f"meta_model_{h}.txt").exists() for h in _HORIZONS)
+        has_all_quantile = all(
+            (model_dir / f"lightgbm_model_{h}_alpha_{a}.txt").exists()
+            for h in _HORIZONS
+            for a in _ALPHAS
+        )
+        if has_meta and has_all_quantile:
             logger.info("Meta (stacking) mode detected")
             self.meta_mode = True
-            # Need base quantile models for meta predictions
-            has_all = all(
-                (model_dir / f"lightgbm_model_{h}_alpha_{a}.txt").exists()
+            self.quantile_mode = True
+            for h in _HORIZONS:
+                self.models[h] = lgb.Booster(
+                    model_file=str(model_dir / f"lightgbm_model_{h}_alpha_0.5.txt")
+                )
+                for a in _ALPHAS:
+                    if a != 0.5:
+                        self.extra[(h, a)] = lgb.Booster(
+                            model_file=str(
+                                model_dir / f"lightgbm_model_{h}_alpha_{a}.txt"
+                            )
+                        )
+                self.meta_models[h] = lgb.Booster(
+                    model_file=str(model_dir / f"meta_model_{h}.txt")
+                )
+            logger.info("Loaded 9 quantile + 3 meta models")
+
+        # 2. Lambdarank mode
+        if not self.meta_mode:
+            has_lr = all(
+                (model_dir / f"lightgbm_model_{h}_lambdarank.txt").exists()
                 for h in _HORIZONS
-                for a in _ALPHAS
             )
-            if has_all:
-                self.quantile_mode = True
+            if has_lr:
+                logger.info("Lambdarank mode detected")
+                self.lambdarank_mode = True
                 for h in _HORIZONS:
                     self.models[h] = lgb.Booster(
-                        model_file=str(model_dir / f"lightgbm_model_{h}_alpha_0.5.txt")
+                        model_file=str(model_dir / f"lightgbm_model_{h}_lambdarank.txt")
                     )
-                    for a in _ALPHAS:
-                        if a != 0.5:
-                            self.extra[(h, a)] = lgb.Booster(
-                                model_file=str(
-                                    model_dir / f"lightgbm_model_{h}_alpha_{a}.txt"
-                                )
-                            )
-                for h in _HORIZONS:
-                    self.meta_models[h] = lgb.Booster(
-                        model_file=str(model_dir / f"meta_model_{h}.txt")
-                    )
-                logger.info("Loaded 9 base quantile models + 3 meta models")
-            else:
-                logger.warning("Meta mode requires quantile models, falling back")
-                self.meta_mode = False
+                logger.info("Loaded 3 lambdarank models")
 
-        if not self.meta_mode:
-            # Detect quantile mode
+        # 3. Quantile mode
+        if not self.meta_mode and not self.lambdarank_mode:
             has_q = all(
                 (model_dir / f"lightgbm_model_{h}_alpha_0.5.txt").exists()
                 for h in _HORIZONS
             )
-            has_all = has_q and all(
-                (model_dir / f"lightgbm_model_{h}_alpha_{a}.txt").exists()
-                for h in _HORIZONS
-                for a in [0.1, 0.9]
-            )
-            if has_all:
-                logger.info("Quantile mode: loading median + 10%/90% models")
+            if has_q:
+                logger.info("Quantile mode")
                 self.quantile_mode = True
                 for h in _HORIZONS:
                     self.models[h] = lgb.Booster(
                         model_file=str(model_dir / f"lightgbm_model_{h}_alpha_0.5.txt")
                     )
-                    self.extra[(h, 0.1)] = lgb.Booster(
-                        model_file=str(model_dir / f"lightgbm_model_{h}_alpha_0.1.txt")
-                    )
-                    self.extra[(h, 0.9)] = lgb.Booster(
-                        model_file=str(model_dir / f"lightgbm_model_{h}_alpha_0.9.txt")
-                    )
-            elif has_q:
-                logger.info("Quantile mode (median only)")
-                self.quantile_mode = True
-                for h in _HORIZONS:
-                    path = model_dir / f"lightgbm_model_{h}_alpha_0.5.txt"
-                    if path.exists():
-                        self.models[h] = lgb.Booster(model_file=str(path))
-            else:
+                    p10 = model_dir / f"lightgbm_model_{h}_alpha_0.1.txt"
+                    p90 = model_dir / f"lightgbm_model_{h}_alpha_0.9.txt"
+                    if p10.exists() and p90.exists():
+                        self.extra[(h, 0.1)] = lgb.Booster(model_file=str(p10))
+                        self.extra[(h, 0.9)] = lgb.Booster(model_file=str(p90))
+
+        # 4. Regression mode
+        if not self.models:
+            for h in _HORIZONS:
+                path = model_dir / f"lightgbm_model_{h}.txt"
+                if path.exists():
+                    self.models[h] = lgb.Booster(model_file=str(path))
+            if self.models:
                 logger.info("Regression mode")
-                for h in _HORIZONS:
-                    path = model_dir / f"lightgbm_model_{h}.txt"
-                    if path.exists():
-                        self.models[h] = lgb.Booster(model_file=str(path))
 
         if not self.models:
             raise FileNotFoundError(f"No models found in {model_dir}")
 
     def _predict_all(self, X: pd.DataFrame) -> dict[str, dict[float, np.ndarray]]:
-        """Predict with all 9 base quantile models."""
         preds: dict[str, dict[float, np.ndarray]] = {}
         for h in _HORIZONS:
             preds[h] = {}
-        for h, model in self.models.items():
-            preds[h][0.5] = np.asarray(model.predict(X), dtype=float)
-        for (h, a), model in self.extra.items():
-            preds.setdefault(h, {})[a] = np.asarray(model.predict(X), dtype=float)
+            if h in self.models:
+                preds[h][0.5] = np.asarray(self.models[h].predict(X), dtype=float)
+            for a in _ALPHAS:
+                if (h, a) in self.extra:
+                    preds[h][a] = np.asarray(self.extra[(h, a)].predict(X), dtype=float)
         return preds
 
     def generate(self, features: pd.DataFrame, ctx: StrategyContext) -> SignalResult:
         factor_cols = [
-            c for c in features.columns if c not in ("ts_code", "trade_date")
+            c
+            for c in features.columns
+            if c not in ("ts_code", "trade_date") and c not in _ZERO_GAIN
         ]
         X = features[factor_cols].fillna(0)
 
-        if self.meta_mode:
-            # Meta mode: predict 9 base → meta model predicts final score
-            base_preds = self._predict_all(X)
-            n = len(X)
-            score = np.zeros(n)
-            extra_low = np.zeros(n)
-            extra_high = np.zeros(n)
-
-            for h in _HORIZONS:
-                meta_feats = np.column_stack(
-                    [base_preds[hor][a] for hor in _HORIZONS for a in _ALPHAS]
-                )
-                h_score = np.asarray(
-                    self.meta_models[h].predict(meta_feats), dtype=float
-                )
-                w = _WEIGHTS.get(h, 0)
-                score += w * h_score
-
-                # Also collect quantile extremes for CI
-                if 0.1 in base_preds[h] and 0.9 in base_preds[h]:
-                    extra_low += w * base_preds[h][0.1]
-                    extra_high += w * base_preds[h][0.9]
-
-            df = features[["ts_code"]].copy()
-            df["score"] = score
-            df["action"] = "buy"
-
-            meta: dict = {"model": "meta_stacking"}
-            ci = (extra_high - extra_low) / 2
-            meta["ci_width"] = ci
-            max_ci = max(np.max(ci), 1e-8)
-            meta["confidence"] = 1.0 - ci / max_ci
-
-            return SignalResult(signals=df, metadata=meta)
-
-        # Original quantile/regression path
         n = len(X)
         score = np.zeros(n)
-        extra_low = np.zeros(n)
-        extra_high = np.zeros(n)
-        has_extra = False
+        meta: dict = {"model": "ml_ensemble"}
 
-        for label, model in self.models.items():
-            w = _WEIGHTS.get(label, 0)
-            pred = np.asarray(model.predict(X), dtype=float)
-            score += w * pred
-            if self.quantile_mode and (label, 0.1) in self.extra:
-                has_extra = True
-                low = np.asarray(self.extra[(label, 0.1)].predict(X), dtype=float)
-                hi = np.asarray(self.extra[(label, 0.9)].predict(X), dtype=float)
-                extra_low += w * low
-                extra_high += w * hi
+        if self.meta_mode:
+            base = self._predict_all(X)
+            extra_low = np.zeros(n)
+            extra_high = np.zeros(n)
+            for h in _HORIZONS:
+                feats = np.column_stack(
+                    [base[hor][a] for hor in _HORIZONS for a in _ALPHAS]
+                )
+                h_score = np.asarray(self.meta_models[h].predict(feats), dtype=float)
+                score += _WEIGHTS.get(h, 0) * h_score
+                if 0.1 in base[h] and 0.9 in base[h]:
+                    extra_low += _WEIGHTS.get(h, 0) * base[h][0.1]
+                    extra_high += _WEIGHTS.get(h, 0) * base[h][0.9]
+            ci = (extra_high - extra_low) / 2
+            meta["ci_width"] = ci
+            meta["confidence"] = 1.0 - ci / max(np.max(ci), 1e-8)
+            meta["model"] = "meta_stacking"
+
+        elif self.lambdarank_mode:
+            # Lambdarank: predict ranking scores, weight by ICIR weights
+            for h, model in self.models.items():
+                pred = np.asarray(model.predict(X), dtype=float)
+                score += _WEIGHTS.get(h, 0) * pred
+
+        elif self.quantile_mode:
+            extra_low = np.zeros(n)
+            extra_high = np.zeros(n)
+            has_extra = bool(self.extra)
+            for h, model in self.models.items():
+                w = _WEIGHTS.get(h, 0)
+                pred = np.asarray(model.predict(X), dtype=float)
+                score += w * pred
+                if has_extra and (h, 0.1) in self.extra:
+                    low = np.asarray(self.extra[(h, 0.1)].predict(X), dtype=float)
+                    hi = np.asarray(self.extra[(h, 0.9)].predict(X), dtype=float)
+                    extra_low += w * low
+                    extra_high += w * hi
+            ci = (extra_high - extra_low) / 2
+            meta["ci_width"] = ci
+            meta["confidence"] = 1.0 - ci / max(np.max(ci), 1e-8)
+
+        else:
+            # Regression mode
+            for h, model in self.models.items():
+                pred = np.asarray(model.predict(X), dtype=float)
+                score += _WEIGHTS.get(h, 0) * pred
 
         df = features[["ts_code"]].copy()
         df["score"] = score
         df["action"] = "buy"
-
-        meta: dict = {"model": "ml_ensemble"}
-        if has_extra:
-            meta["score_low"] = extra_low
-            meta["score_high"] = extra_high
-            ci = (extra_high - extra_low) / 2
-            meta["ci_width"] = ci
-            max_ci = max(np.max(ci), 1e-8)
-            meta["confidence"] = 1.0 - ci / max_ci
 
         return SignalResult(signals=df, metadata=meta)

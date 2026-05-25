@@ -34,6 +34,7 @@ class LightGBMPipeline:
             self.config.val_start,
             self.config.val_end,
             feature_names=self.config.feature_names,
+            lambdarank=self.config.lambdarank,
         )
 
         logger.info(

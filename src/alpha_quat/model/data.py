@@ -9,6 +9,40 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Features consistently zero-gain across all models — excluded by default
+_ZERO_GAIN_FEATURES = {
+    "KMID94",
+    "KMID95",
+    "KMID96",
+    "KLEN94",
+    "KLEN95",
+    "KLEN96",
+    "KMID97",
+    "KLEN97",
+    "KMID98",
+    "KLEN98",
+    "KMID99",
+    "KLEN99",
+    "KMID100",
+    "KLEN100",
+    "KMID101",
+    "O2C",
+    "DRP",
+    "HLC",
+    "pe_ttm",
+    "pb",
+    "ROE_RAW",
+    "ROE",
+    "MV",
+    "VOLRATIO",
+    "EMA12C",
+    "EMA26C",
+    "MACD",
+    "RSI14",
+    "SLOPE5",
+    "SLOPE20",
+}
+
 
 @dataclass
 class DatasetResult:
@@ -44,6 +78,7 @@ class DatasetBuilder:
         val_start: str,
         val_end: str,
         feature_names: list[str] | None = None,
+        lambdarank: bool = False,
     ) -> DatasetResult:
         cal_dates = self._get_trade_dates()
         cal_arr = cal_dates.to_numpy()
@@ -101,7 +136,7 @@ class DatasetBuilder:
         if feature_names is not None:
             factor_cols = [c for c in all_factor_cols if c in feature_names]
         else:
-            factor_cols = all_factor_cols
+            factor_cols = [c for c in all_factor_cols if c not in _ZERO_GAIN_FEATURES]
 
         factor_select = ", ".join(f'"{c}"' for c in factor_cols)
         factor_notnull = " AND ".join(f'"{c}" IS NOT NULL' for c in factor_cols)
@@ -176,18 +211,23 @@ class DatasetBuilder:
         merged["trade_date"] = merged["trade_date"].astype(str)
 
         # Discretize labels for lambdarank (10 quantile bins per trade_date)
-        for col in ["ret_5d", "ret_20d", "ret_60d"]:
-            merged[col] = merged.groupby("trade_date")[col].transform(
-                lambda g: (
-                    pd.qcut(g, 10, labels=False, duplicates="drop")
-                    if len(g) >= 10
-                    else pd.Categorical(
-                        pd.qcut(g, min(len(g), 5), labels=False, duplicates="drop")
-                    ).astype(int)
-                )
-            )
-            merged = merged.dropna(subset=[col])
-            merged[col] = merged[col].astype(int)
+        # Uses iterative groupby to avoid pandas groupby.transform memory blowup
+        if lambdarank:
+            for col in ["ret_5d", "ret_20d", "ret_60d"]:
+                result_series = pd.Series(np.nan, index=merged.index, dtype=float)
+                for _, group in merged.groupby("trade_date"):
+                    n = len(group)
+                    if n >= 10:
+                        result_series.loc[group.index] = pd.qcut(
+                            group[col], 10, labels=False, duplicates="drop"
+                        ).values
+                    elif n >= 3:
+                        result_series.loc[group.index] = pd.qcut(
+                            group[col], min(n, 3), labels=False, duplicates="drop"
+                        ).values
+                merged[col] = result_series
+                merged = merged.dropna(subset=[col])
+                merged[col] = merged[col].astype(int)
 
         train_mask = (merged["trade_date"] >= train_start) & (
             merged["trade_date"] <= train_end
