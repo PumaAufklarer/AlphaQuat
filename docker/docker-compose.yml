@@ -1,0 +1,26 @@
+services:
+  alpha-quat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: alpha-quat:latest
+    container_name: alpha-quat
+    restart: unless-stopped
+    environment:
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:?err}
+      - DATA_DIR=/data
+      - FETCH_SOURCES=all
+      - FEATURE_SET=alpha_combined
+      - FEATURE_SINCE=
+      - SCHEDULE=0 2 * * *
+      - ONE_SHOT=false
+    volumes:
+      - alpha-quat-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  alpha-quat-data:

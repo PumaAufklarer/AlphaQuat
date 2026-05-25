@@ -1,0 +1,4 @@
+tushare:
+  token: "your_tushare_token_here"
+data:
+  dir: "./data"

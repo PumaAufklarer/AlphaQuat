@@ -1,0 +1,17 @@
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.egg-info
+data/
+config.yaml
+.DS_Store
+*.md
+docs/
+tests/
+opencode.json
+AGENTS.md
