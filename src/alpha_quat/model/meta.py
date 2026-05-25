@@ -132,10 +132,13 @@ def train_meta_model(
     y_val = val_df[label_col]
 
     meta_model = lgb.LGBMRegressor(
-        n_estimators=200,
-        learning_rate=0.05,
-        num_leaves=15,
-        min_child_samples=50,
+        n_estimators=150,
+        learning_rate=0.04,
+        num_leaves=12,
+        min_child_samples=100,
+        reg_alpha=0.1,
+        reg_lambda=0.1,
+        min_gain_to_split=0.001,
         verbose=-1,
         random_state=42,
     )
