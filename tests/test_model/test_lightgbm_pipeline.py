@@ -161,13 +161,13 @@ class TestLightGBMPipeline:
             pipeline = LightGBMPipeline(data_dir, config)
             results = pipeline.run()
 
-            assert "ret_5d" in results
-            assert "ret_20d" in results
-            assert "ret_60d" in results
-            assert results["ret_5d"].mse >= 0
-            assert results["ret_20d"].mse >= 0
-            assert results["ret_60d"].mse >= 0
-            assert len(results["ret_5d"].top5_features) == 5
+            assert "5d" in results
+            assert "20d" in results
+            assert "60d" in results
+            assert results["5d"]["5d"].mse >= 0
+            assert results["20d"]["20d"].mse >= 0
+            assert results["60d"]["60d"].mse >= 0
+            assert len(results["5d"]["5d"].top5_features) == 5
 
             models_dir = data_dir / "models"
             assert (models_dir / "lightgbm_model_5d.txt").exists()
@@ -178,10 +178,9 @@ class TestLightGBMPipeline:
             with open(models_dir / "results.json") as f:
                 results_json = json.load(f)
             assert results_json["model_type"] == "lightgbm"
-            assert "ret_5d" in results_json
-            assert "ret_20d" in results_json
-            assert "ret_60d" in results_json
-            assert "ret_20d" in results_json
-            assert "mse" in results_json["ret_5d"]
-            assert "mean_ic" in results_json["ret_5d"]
-            assert "top5_features" in results_json["ret_5d"]
+            assert "5d" in results_json
+            assert "20d" in results_json
+            assert "60d" in results_json
+            assert "mse" in results_json["5d"]
+            assert "mean_ic" in results_json["5d"]
+            assert "top5_features" in results_json["5d"]

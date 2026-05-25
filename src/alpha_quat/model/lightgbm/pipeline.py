@@ -5,7 +5,7 @@ from pathlib import Path
 from alpha_quat.model.data import DatasetBuilder
 from alpha_quat.model.lightgbm.config import LightGBMConfig
 from alpha_quat.model.lightgbm.evaluate import EvalResult, LightGBMEvaluator
-from alpha_quat.model.lightgbm.train import LightGBMTrainer
+from alpha_quat.model.lightgbm.train import LightGBMTrainer, pinball_loss
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,15 @@ class LightGBMPipeline:
         self.trainer = LightGBMTrainer(config)
         self.evaluator = LightGBMEvaluator()
 
-    def run(self) -> dict[str, EvalResult]:
+    def _suffix(self, horizon: str, alpha: float | None) -> str:
+        if alpha is not None:
+            return f"{horizon}_alpha_{alpha}"
+        return horizon
+
+    def _model_path(self, suffix: str) -> Path:
+        return self.data_dir / "models" / f"lightgbm_model_{suffix}.txt"
+
+    def run(self) -> dict[str, dict[str, EvalResult]]:
         logger.info("Building dataset...")
         data = self.builder.build(
             self.config.train_start,
@@ -34,70 +42,49 @@ class LightGBMPipeline:
             len(data.X_val),
         )
 
-        logger.info("Training model_5d...")
-        model_5d, params_5d = self.trainer.train(data.X_train, data.y_train_5, "ret_5d")
+        horizons = [
+            ("5d", data.y_train_5, data.y_val_5),
+            ("20d", data.y_train_20, data.y_val_20),
+            ("60d", data.y_train_60, data.y_val_60),
+        ]
+        alphas = self.config.quantile_alphas or [None]
+        results: dict[str, dict[str, EvalResult]] = {}
 
-        logger.info("Training model_20d...")
-        model_20d, params_20d = self.trainer.train(
-            data.X_train, data.y_train_20, "ret_20d"
-        )
+        for h_name, y_tr, y_val in horizons:
+            results[h_name] = {}
+            for alpha in alphas:
+                suffix = self._suffix(h_name, alpha)
+                label = suffix
 
-        logger.info("Training model_60d...")
-        model_60d, params_60d = self.trainer.train(
-            data.X_train, data.y_train_60, "ret_60d"
-        )
+                logger.info("Training %s...", label)
+                model, params = self.trainer.train(
+                    data.X_train, y_tr, label, quantile_alpha=alpha
+                )
 
-        logger.info("Evaluating model_5d...")
-        result_5d = self.evaluator.evaluate(
-            model_5d,
-            data.X_val,
-            data.y_val_5,
-            data.val_dates,
-            data.val_codes,
-            params_5d,
-            self.config.feature_names,
-            "ret_5d",
-        )
+                logger.info("Evaluating %s...", label)
+                result = self.evaluator.evaluate(
+                    model,
+                    data.X_val,
+                    y_val,
+                    data.val_dates,
+                    data.val_codes,
+                    params,
+                    self.config.feature_names,
+                    label,
+                    quantile_alpha=alpha,
+                )
+                results[h_name][suffix] = result
 
-        logger.info("Evaluating model_20d...")
-        result_20d = self.evaluator.evaluate(
-            model_20d,
-            data.X_val,
-            data.y_val_20,
-            data.val_dates,
-            data.val_codes,
-            params_20d,
-            self.config.feature_names,
-            "ret_20d",
-        )
+                output_dir = self.data_dir / "models"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                model.save_model(str(output_dir / f"lightgbm_model_{suffix}.txt"))
 
-        logger.info("Evaluating model_60d...")
-        result_60d = self.evaluator.evaluate(
-            model_60d,
-            data.X_val,
-            data.y_val_60,
-            data.val_dates,
-            data.val_codes,
-            params_60d,
-            self.config.feature_names,
-            "ret_60d",
-        )
+        self._save_results(results)
+        self._print_summary(results)
 
-        self._save_models(model_5d, model_20d, model_60d)
-        self._save_results(result_5d, result_20d, result_60d)
-        self._print_summary(result_5d, result_20d, result_60d)
+        return results
 
-        return {"ret_5d": result_5d, "ret_20d": result_20d, "ret_60d": result_60d}
-
-    def _save_models(self, model_5d, model_20d, model_60d):
-        output_dir = self.data_dir / "models"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        model_5d.save_model(str(output_dir / "lightgbm_model_5d.txt"))
-        model_20d.save_model(str(output_dir / "lightgbm_model_20d.txt"))
-        model_60d.save_model(str(output_dir / "lightgbm_model_60d.txt"))
-        logger.info("Models saved to %s", output_dir)
-
-    def _save_results(self, result_5d, result_20d, result_60d):
+    def _save_results(self, results: dict[str, dict[str, EvalResult]]):
         output_dir = self.data_dir / "models"
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,9 +103,6 @@ class LightGBMPipeline:
 
         output = {
             "model_type": "lightgbm",
-            "ret_5d": _make_json(result_5d),
-            "ret_20d": _make_json(result_20d),
-            "ret_60d": _make_json(result_60d),
             "config": {
                 "train_start": self.config.train_start,
                 "train_end": self.config.train_end,
@@ -126,34 +110,39 @@ class LightGBMPipeline:
                 "val_end": self.config.val_end,
             },
         }
+        for h_name, alphas_dict in results.items():
+            for suffix, result in alphas_dict.items():
+                output[suffix] = _make_json(result)
 
         with open(output_dir / "results.json", "w") as f:
             json.dump(output, f, indent=2, ensure_ascii=False, default=str)
         logger.info("Results saved to %s", output_dir / "results.json")
 
-    def _print_summary(self, result_5d, result_20d, result_60d):
+    def _print_summary(self, results: dict[str, dict[str, EvalResult]]):
         print()
         print("=" * 60)
         print("  LIGHTGBM MODEL EVALUATION")
         print("=" * 60)
 
-        for label, result in [
-            ("ret_5d", result_5d),
-            ("ret_20d", result_20d),
-            ("ret_60d", result_60d),
-        ]:
-            print(f"\n  --- {label} ---")
-            print(f"  MSE:      {result.mse:.6f}")
-            print(f"  MAE:      {result.mae:.6f}")
-            print(f"  Mean IC:  {result.mean_ic:.4f}")
-            print(f"  IC Std:   {result.ic_std:.4f}")
-            print(f"  ICIR:     {result.icir:.4f}")
-            print("  Top 5 features (gain):")
-            for name, val in result.top5_features:
-                print(f"    {name}: {val:.4f}")
-            print("  Bottom 5 features (gain):")
-            for name, val in result.bottom5_features:
-                print(f"    {name}: {val:.4f}")
+        for h_name, alphas_dict in results.items():
+            for suffix, result in alphas_dict.items():
+                metric = f"Pinball" if "_alpha_" in suffix else "MSE"
+                print(f"\n  --- {suffix} ---")
+                print(
+                    f"  {metric}: {result.mse:.6f}"
+                    if "_alpha_" in suffix
+                    else f"  MSE:      {result.mse:.6f}"
+                )
+                if "_alpha_0.5" in suffix or "_alpha_" not in suffix:
+                    print(f"  Mean IC:  {result.mean_ic:.4f}")
+                    print(f"  IC Std:   {result.ic_std:.4f}")
+                    print(f"  ICIR:     {result.icir:.4f}")
+                print("  Top 5 features (gain):")
+                for name, val in result.top5_features:
+                    print(f"    {name}: {val:.4f}")
+                print("  Bottom 5 features (gain):")
+                for name, val in result.bottom5_features:
+                    print(f"    {name}: {val:.4f}")
 
         print()
         print("=" * 60)

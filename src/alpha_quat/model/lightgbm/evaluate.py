@@ -6,6 +6,8 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from alpha_quat.model.lightgbm.train import pinball_loss
+
 
 @dataclass
 class EvalResult:
@@ -59,15 +61,33 @@ class LightGBMEvaluator:
         best_params: dict,
         feature_names: list[str] | None,
         label_name: str,
+        quantile_alpha: float | None = None,
     ) -> EvalResult:
         y_pred_raw = model.predict(X_val)
         y_pred = np.asarray(y_pred_raw, dtype=float)
         y_true = np.asarray(y_val, dtype=float)
 
-        mse = float(mean_squared_error(y_val, y_pred))
-        mae = float(mean_absolute_error(y_val, y_pred))
+        if quantile_alpha is not None:
+            loss = pinball_loss(y_true, y_pred, quantile_alpha)
+        else:
+            loss = float(mean_squared_error(y_val, y_pred))
 
-        rank_ic = self.compute_rank_ic(y_pred, y_true, val_dates.to_numpy())
+        mse = (
+            loss
+            if quantile_alpha is not None
+            else float(mean_squared_error(y_val, y_pred))
+        )
+        mae = (
+            float(mean_absolute_error(y_val, y_pred))
+            if quantile_alpha is None
+            else loss
+        )
+
+        # Rank IC only meaningful for median (alpha=0.5) or regression
+        if quantile_alpha is None or abs(quantile_alpha - 0.5) < 0.01:
+            rank_ic = self.compute_rank_ic(y_pred, y_true, val_dates.to_numpy())
+        else:
+            rank_ic = RankICResult(mean_ic=0.0, ic_std=0.0, icir=0.0)
 
         importance = model.feature_importance(importance_type="gain")
         feature_names_list = (

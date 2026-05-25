@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -22,3 +22,5 @@ class LightGBMConfig:
     tune: bool = True
 
     feature_names: list[str] | None = None
+
+    quantile_alphas: list[float] | None = field(default_factory=lambda: None)

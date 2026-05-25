@@ -11,11 +11,30 @@ from alpha_quat.model.lightgbm.config import LightGBMConfig
 logger = logging.getLogger(__name__)
 
 
+def pinball_loss(y_true: np.ndarray, y_pred: np.ndarray, alpha: float) -> float:
+    diff = y_true - y_pred
+    return float(np.mean(np.maximum(alpha * diff, (alpha - 1) * diff)))
+
+
 class LightGBMTrainer:
     def __init__(self, config: LightGBMConfig):
         self.config = config
 
-    def _base_params(self) -> dict:
+    def _base_params(self, quantile_alpha: float | None = None) -> dict:
+        if quantile_alpha is not None:
+            return {
+                "objective": "quantile",
+                "metric": "quantile",
+                "alpha": quantile_alpha,
+                "num_leaves": self.config.num_leaves,
+                "learning_rate": self.config.learning_rate,
+                "n_estimators": self.config.n_estimators,
+                "feature_fraction": self.config.feature_fraction,
+                "bagging_fraction": self.config.bagging_fraction,
+                "verbose": self.config.verbosity,
+                "random_state": self.config.random_state,
+                "n_jobs": self.config.n_jobs,
+            }
         return {
             "objective": "regression",
             "metric": "l2",
@@ -70,8 +89,14 @@ class LightGBMTrainer:
 
         return self._fit(params, X_tr, y_tr, X_ev, y_ev, n_est)
 
-    def _objective(self, trial: optuna.Trial, X: pd.DataFrame, y: pd.Series) -> float:
-        params = self._base_params()
+    def _objective(
+        self,
+        trial: optuna.Trial,
+        X: pd.DataFrame,
+        y: pd.Series,
+        quantile_alpha: float | None = None,
+    ) -> float:
+        params = self._base_params(quantile_alpha)
         params.update(
             {
                 "num_leaves": trial.suggest_int("num_leaves", 15, 63),
@@ -94,15 +119,25 @@ class LightGBMTrainer:
             y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
             model = self._fit(params, X_tr, y_tr, X_val, y_val, n_est)
-            y_pred = model.predict(X_val)
-            mse = float(((y_val.values - y_pred) ** 2).mean())
-            scores.append(mse)
+            y_pred = np.asarray(model.predict(X_val), dtype=float)
+
+            if quantile_alpha is not None:
+                scores.append(pinball_loss(y_val.values, y_pred, quantile_alpha))
+            else:
+                scores.append(float(((y_val.values - y_pred) ** 2).mean()))
 
         return float(np.mean(scores))
 
     def train(
-        self, X: pd.DataFrame, y: pd.Series, label_name: str = ""
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        label_name: str = "",
+        quantile_alpha: float | None = None,
     ) -> tuple[lgb.Booster, dict]:
+        params = self._base_params(quantile_alpha)
+        metric_name = "pinball" if quantile_alpha is not None else "MSE"
+
         if self.config.tune:
             logger.info(
                 "Starting Optuna hyperparameter tuning (%s), %d trials",
@@ -114,15 +149,16 @@ class LightGBMTrainer:
                 sampler=optuna.samplers.TPESampler(seed=self.config.random_state),
             )
             study.optimize(
-                lambda trial: self._objective(trial, X, y),
+                lambda trial: self._objective(trial, X, y, quantile_alpha),
                 n_trials=self.config.n_trials,
                 show_progress_bar=False,
             )
-            best_params = self._base_params()
+            best_params = self._base_params(quantile_alpha)
             best_params.update(study.best_params)
             logger.info(
-                "Best trial (%s): MSE=%.6f, params=%s",
+                "Best trial (%s): %s=%.6f, params=%s",
                 label_name,
+                metric_name,
                 study.best_value,
                 study.best_params,
             )
@@ -134,7 +170,6 @@ class LightGBMTrainer:
             return model, best_params
         else:
             logger.info("Training LightGBM with base params (%s)", label_name)
-            params = self._base_params()
             model = self._train_lgb(params, X, y)
             params["best_iteration"] = model.best_iteration
             return model, params

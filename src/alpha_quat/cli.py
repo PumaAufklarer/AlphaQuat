@@ -282,6 +282,11 @@ def _build_model_parser(subparsers):
         default=None,
         help="Comma-separated feature subset (default: all 158)",
     )
+    lgb_parser.add_argument(
+        "--quantile",
+        action="store_true",
+        help="Train quantile regression models (10%/50%/90% instead of point estimates)",
+    )
     return model_parser
 
 
@@ -299,6 +304,7 @@ def _cmd_model(args, config):
             n_trials=args.trials,
             tune=not args.no_tune,
             feature_names=feature_names,
+            quantile_alphas=[0.1, 0.5, 0.9] if args.quantile else None,
         )
         pipeline = LightGBMPipeline(config.data_dir, cfg)
         pipeline.run()
