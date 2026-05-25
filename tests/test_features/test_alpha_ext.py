@@ -6,7 +6,7 @@ class TestAlphaExt:
     def test_all_factors_registered(self):
         reg = build_alpha_ext()
         assert reg.name == "alpha_ext"
-        assert len(reg.factors) == 7
+        assert len(reg.factors) == 13
 
     def test_all_factors_compile(self):
         from alpha_quat.features.factor import compile

@@ -48,6 +48,20 @@ _FACTORS = [
         expression="($high - $close) / ($high - $low)",
         category="price",
     ),
+    # === EMA — exponential moving average (approximated via decay-weighted sum) ===
+    Factor(name="EMA12C", expression="EMA($close, 12)", category="price"),
+    Factor(name="EMA26C", expression="EMA($close, 26)", category="price"),
+    Factor(
+        name="MACD",
+        expression="EMA12C - EMA26C",
+        depends_on=["EMA12C", "EMA26C"],
+        category="price",
+    ),
+    # === RSI — relative strength index ===
+    Factor(name="RSI14", expression="RSI($close, 14)", category="price"),
+    # === REG_SLOPE — linear regression slope (trend strength) ===
+    Factor(name="SLOPE5", expression="REG_SLOPE($close, 5)", category="price"),
+    Factor(name="SLOPE20", expression="REG_SLOPE($close, 20)", category="price"),
 ]
 
 

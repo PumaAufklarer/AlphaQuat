@@ -106,3 +106,20 @@ class TestCompile:
     def test_factor_reference_passthrough(self):
         assert compile("f_001") == "f_001"
         assert compile("f_050") == "f_050"
+
+    def test_ema(self):
+        result = compile("EMA($close, 5)")
+        assert "SUM(close * POW" in result
+        assert "OVER (w_time ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)" in result
+        assert "__rn" in result
+
+    def test_reg_slope(self):
+        result = compile("REG_SLOPE($close, 10)")
+        assert "REGR_SLOPE(close, CAST(__rn AS DOUBLE))" in result
+        assert "OVER (w_time ROWS BETWEEN 9 PRECEDING AND CURRENT ROW)" in result
+
+    def test_rsi(self):
+        result = compile("RSI($close, 14)")
+        assert "100.0 - 100.0" in result
+        assert "CASE WHEN close > LAG(close, 1)" in result
+        assert "OVER (w_time ROWS BETWEEN 13 PRECEDING AND CURRENT ROW)" in result

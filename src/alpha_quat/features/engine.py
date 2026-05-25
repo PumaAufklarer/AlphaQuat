@@ -79,7 +79,10 @@ class FeatureEngine:
         prev = "raw"
 
         if ts_exprs:
-            sql += ", _ts AS (\n  SELECT *,\n    "
+            # Check if any factor uses EMA or REG_SLOPE (needs __rn)
+            has_rn = any("__rn" in e for e in ts_exprs)
+            rn_col = ",\n    ROW_NUMBER() OVER w_time AS __rn" if has_rn else ""
+            sql += f", _ts AS (\n  SELECT *{rn_col},\n    "
             sql += ",\n    ".join(ts_exprs)
             sql += f"\n  FROM {prev}\n  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)\n)"
             prev = "_ts"
