@@ -21,3 +21,8 @@ class BacktestConfig:
     )
     daily_monitor: bool = False
     sell_score_percentile: float | None = None
+    confidence_threshold: float | None = (
+        None  # min confidence (0-1) for CI-based daily mode
+    )
+    sell_upper_threshold: float = 0.35
+    weighting_strategy: str = "equal"  # equal|vol_parity|score_momentum|kelly

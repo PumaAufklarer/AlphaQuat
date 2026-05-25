@@ -109,6 +109,24 @@ def _build_backtest_parser(subparsers):
         default=None,
         help="Sell holdings scoring below this percentile (e.g. 0.50=below median)",
     )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=None,
+        help="Min confidence (0-1) for CI-based sell decisions (requires quantile models)",
+    )
+    parser.add_argument(
+        "--sell-upper",
+        type=float,
+        default=0.35,
+        help="Sell if confident AND upper bound < this threshold (default 0.35)",
+    )
+    parser.add_argument(
+        "--weighting",
+        default="equal",
+        choices=["equal", "vol_parity", "score_momentum", "kelly"],
+        help="Position sizing strategy (default: equal)",
+    )
     return parser
 
 
@@ -228,6 +246,9 @@ def _cmd_backtest(args, config):
         sell_threshold=args.sell_threshold,
         daily_monitor=args.daily_monitor,
         sell_score_percentile=args.sell_score_percentile,
+        confidence_threshold=args.confidence_threshold,
+        sell_upper_threshold=args.sell_upper,
+        weighting_strategy=args.weighting,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()

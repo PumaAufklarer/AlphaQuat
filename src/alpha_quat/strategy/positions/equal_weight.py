@@ -14,9 +14,13 @@ class EqualWeightTopKPosition(IPositionManager):
         if buys.empty:
             return pd.DataFrame(columns=["ts_code", "target_weight"])
         buys = buys.sort_values("score", ascending=False).head(self.top_k)
-        weight = 1.0 / len(buys)
+        # Score-proportional weights when scores vary, equal weights when flat
+        if buys["score"].max() > buys["score"].min() * 1.05:
+            weights = buys["score"].values / buys["score"].values.sum()
+        else:
+            weights = [1.0 / len(buys)] * len(buys)
         return pd.DataFrame(
-            {"ts_code": buys["ts_code"].values, "target_weight": [weight] * len(buys)}
+            {"ts_code": buys["ts_code"].values, "target_weight": weights}
         )
 
     def constrain(self, positions, ctx):

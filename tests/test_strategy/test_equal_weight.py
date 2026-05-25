@@ -29,7 +29,7 @@ class TestEqualWeightTopKPosition:
         )
         pos = pm.allocate(signals, StrategyContext(trade_date="d", capital=1e5))
         assert len(pos) == 2
-        assert pos["target_weight"].iloc[0] == 0.5
+        assert pos["target_weight"].iloc[0] == pytest.approx(0.529, abs=0.01)
         assert pos["target_weight"].sum() == pytest.approx(1.0)
 
     def test_allocate_sells_ignored(self):

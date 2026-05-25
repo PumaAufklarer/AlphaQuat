@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from alpha_quat.backtest.config import BacktestConfig
@@ -39,6 +40,7 @@ class BacktestEngine:
         self._total_invested = config.initial_capital
         self._last_rebalance_idx: int | None = None
         self._additions: dict[str, float] = {}  # date -> capital added
+        self._score_history: dict[str, list[float]] = {}  # stock -> list of scores
 
     def run(self):
         cal_path = self.data_dir / "trade_cal.parquet"
@@ -184,17 +186,19 @@ class BacktestEngine:
                         )
                     )
 
-                    # Determine score threshold for sell
-                    all_scores = signal_result.signals["score"]
-                    score_cut = None
-                    if self.config.sell_score_percentile is not None:
-                        score_cut = all_scores.quantile(
-                            self.config.sell_score_percentile
+                    # Extract CI / confidence from metadata
+                    meta = signal_result.metadata
+                    has_ci = "ci_width" in meta and "confidence" in meta
+                    if has_ci:
+                        ci_map = dict(
+                            zip(signal_result.signals["ts_code"], meta["ci_width"])
                         )
-                        if isinstance(score_cut, pd.Series):
-                            score_cut = float(score_cut.iloc[0])
-                        else:
-                            score_cut = float(score_cut)
+                        conf_map = dict(
+                            zip(signal_result.signals["ts_code"], meta["confidence"])
+                        )
+                        hi_map = dict(
+                            zip(signal_result.signals["ts_code"], meta["score_high"])
+                        )
 
                     sell_codes = []
                     buy_codes = []
@@ -204,19 +208,49 @@ class BacktestEngine:
                         if px and px < h.peak_price * (1 - self.config.stop_loss_pct):
                             sell_codes.append(code)
                             continue
-                        # Score percentile
-                        if score_cut is not None:
+                        # CI-based: confident sell when upper bound < threshold
+                        if (
+                            has_ci
+                            and self.config.confidence_threshold is not None
+                            and conf_map.get(code, 0)
+                            >= self.config.confidence_threshold
+                        ):
+                            if hi_map.get(code, 0) < self.config.sell_upper_threshold:
+                                sell_codes.append(code)
+                                continue
+                        # Score percentile (fallback if no CI)
+                        if not has_ci and self.config.sell_score_percentile is not None:
+                            all_scores = signal_result.signals["score"]
+                            score_cut = all_scores.quantile(
+                                self.config.sell_score_percentile
+                            )
+                            if isinstance(score_cut, pd.Series):
+                                score_cut = float(score_cut.iloc[0])
+                            else:
+                                score_cut = float(score_cut)
                             sc = scores_map.get(code, 0)
                             if sc < score_cut:
                                 sell_codes.append(code)
 
-                    # Buy: highest-scored stock not already held
+                    # Buy: sort by score × confidence when CI available, else by score
                     current_set = set(self.portfolio.holdings.keys()) - set(sell_codes)
-                    for code in signal_result.signals["ts_code"]:
-                        if code not in current_set and code not in sell_codes:
-                            buy_codes.append(code)
-                            if len(buy_codes) >= self.config.top_k - len(current_set):
-                                break
+                    buy_pool = signal_result.signals[
+                        ~signal_result.signals["ts_code"].isin(
+                            current_set | set(sell_codes)
+                        )
+                    ].copy()
+                    if has_ci:
+                        buy_pool["buy_score"] = buy_pool["score"] * buy_pool[
+                            "ts_code"
+                        ].map(lambda c: conf_map.get(c, 0))
+                        buy_pool = buy_pool.sort_values("buy_score", ascending=False)
+                    else:
+                        buy_pool = buy_pool.sort_values("score", ascending=False)
+                    buy_codes = (
+                        buy_pool["ts_code"]
+                        .head(self.config.top_k - len(current_set))
+                        .tolist()
+                    )
 
                     # Ensure we have at least initial top_k positions
                     if (
@@ -258,19 +292,58 @@ class BacktestEngine:
                     )
                     signal_result = self.signal_gen.generate(features, ctx_sig)
 
-                    top_codes = signal_result.signals.nlargest(
-                        self.config.top_k, "score"
-                    )["ts_code"].tolist()
-                    current_codes = list(self.portfolio.holdings.keys())
-                    buy_codes = [c for c in top_codes if c not in current_codes]
-
-                    # Graded sell: only sell stocks outside Top-K if score < threshold
+                    # Raw scores map (used everywhere)
                     scores_map = dict(
                         zip(
                             signal_result.signals["ts_code"],
                             signal_result.signals["score"],
                         )
                     )
+
+                    # Compute adjusted scores for position sizing
+                    strat = self.config.weighting_strategy
+                    all_scores = signal_result.signals["score"].values.copy()
+                    adjusted = all_scores.copy()
+
+                    if strat == "vol_parity":
+                        vol_col = [c for c in features.columns if "KLEN38" in c]
+                        if vol_col:
+                            vol = features[vol_col[0]].fillna(0).values + 1e-8
+                            adjusted = all_scores / vol
+                    elif strat == "kelly":
+                        for i, code in enumerate(signal_result.signals["ts_code"]):
+                            raw = all_scores[i]
+                            hist = self._score_history.get(code, [raw])
+                            if len(hist) >= 3:
+                                mean_s = float(np.mean(hist))
+                                var_s = max(float(np.var(hist, ddof=1)) + 1e-8, 1e-8)
+                                f = mean_s / var_s
+                                adjusted[i] = raw * min(f, 3.0)
+                            else:
+                                adjusted[i] = raw
+                    elif strat == "score_momentum":
+                        for i, code in enumerate(signal_result.signals["ts_code"]):
+                            raw = all_scores[i]
+                            hist = self._score_history.get(code, [])
+                            bonus = min(len(hist) / 5, 1.0)
+                            adjusted[i] = raw * (1 + bonus)
+
+                    # Top-K by adjusted score
+                    signal_result.signals["adj_score"] = adjusted
+                    top_codes = signal_result.signals.nlargest(
+                        self.config.top_k, "adj_score"
+                    )["ts_code"].tolist()
+                    current_codes = list(self.portfolio.holdings.keys())
+                    buy_codes = [c for c in top_codes if c not in current_codes]
+
+                    # Update score history for top_codes (used by kelly/score_momentum)
+                    if strat in ("kelly", "score_momentum"):
+                        for code in top_codes:
+                            self._score_history.setdefault(code, []).append(
+                                scores_map.get(code, 0)
+                            )
+
+                    # Graded sell: only sell stocks outside Top-K if score < threshold
                     sell_codes = []
                     for code in current_codes:
                         if code not in top_codes:
@@ -282,11 +355,13 @@ class BacktestEngine:
                                 sell_codes.append(code)
 
                     if sell_codes or buy_codes:
+                        # Use adjusted scores for proportional allocation
+                        adj_map = dict(zip(signal_result.signals["ts_code"], adjusted))
+                        buy_scores = [adj_map.get(c, 1) for c in buy_codes]
                         sig_df = pd.DataFrame(
                             {
                                 "ts_code": buy_codes + sell_codes,
-                                "score": [1.0] * len(buy_codes)
-                                + [0.0] * len(sell_codes),
+                                "score": buy_scores + [0.0] * len(sell_codes),
                                 "action": ["buy"] * len(buy_codes)
                                 + ["sell"] * len(sell_codes),
                             }
