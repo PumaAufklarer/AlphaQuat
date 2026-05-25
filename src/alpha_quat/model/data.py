@@ -197,10 +197,27 @@ class DatasetBuilder:
               AND dw.max_high_60 != dw.min_low_60
               AND {factor_notnull}
         )
-        SELECT ts_code, trade_date, ret_5d, ret_20d, ret_60d, {factor_select}
-        FROM labeled
-        ORDER BY trade_date
         """
+        if lambdarank:
+            query += f"""
+            , final AS (
+              SELECT *,
+                CAST(NTILE(10) OVER (PARTITION BY trade_date ORDER BY ret_5d) - 1 AS INTEGER) AS y5,
+                CAST(NTILE(10) OVER (PARTITION BY trade_date ORDER BY ret_20d) - 1 AS INTEGER) AS y20,
+                CAST(NTILE(10) OVER (PARTITION BY trade_date ORDER BY ret_60d) - 1 AS INTEGER) AS y60
+              FROM labeled
+            )
+            SELECT ts_code, trade_date, y5, y20, y60, {factor_select}
+            FROM final
+            WHERE y5 >= 0 AND y20 >= 0 AND y60 >= 0
+            ORDER BY trade_date
+            """
+        else:
+            query += f"""
+            SELECT ts_code, trade_date, ret_5d, ret_20d, ret_60d, {factor_select}
+            FROM labeled
+            ORDER BY trade_date
+            """
 
         merged = con.execute(query).fetchdf()
         con.close()
@@ -209,25 +226,6 @@ class DatasetBuilder:
             raise ValueError("No feature data found in the specified date range")
 
         merged["trade_date"] = merged["trade_date"].astype(str)
-
-        # Discretize labels for lambdarank (10 quantile bins per trade_date)
-        # Uses iterative groupby to avoid pandas groupby.transform memory blowup
-        if lambdarank:
-            for col in ["ret_5d", "ret_20d", "ret_60d"]:
-                result_series = pd.Series(np.nan, index=merged.index, dtype=float)
-                for _, group in merged.groupby("trade_date"):
-                    n = len(group)
-                    if n >= 10:
-                        result_series.loc[group.index] = pd.qcut(
-                            group[col], 10, labels=False, duplicates="drop"
-                        ).values
-                    elif n >= 3:
-                        result_series.loc[group.index] = pd.qcut(
-                            group[col], min(n, 3), labels=False, duplicates="drop"
-                        ).values
-                merged[col] = result_series
-                merged = merged.dropna(subset=[col])
-                merged[col] = merged[col].astype(int)
 
         train_mask = (merged["trade_date"] >= train_start) & (
             merged["trade_date"] <= train_end
@@ -245,6 +243,24 @@ class DatasetBuilder:
         val_groups = (
             merged.loc[val_mask].groupby("trade_date", sort=False).size().tolist()
         )
+
+        if lambdarank:
+            return DatasetResult(
+                X_train=X_train,
+                X_val=X_val,
+                y_train_5=merged.loc[train_mask, "y5"].reset_index(drop=True),
+                y_val_5=merged.loc[val_mask, "y5"].reset_index(drop=True),
+                y_train_20=merged.loc[train_mask, "y20"].reset_index(drop=True),
+                y_val_20=merged.loc[val_mask, "y20"].reset_index(drop=True),
+                y_train_60=merged.loc[train_mask, "y60"].reset_index(drop=True),
+                y_val_60=merged.loc[val_mask, "y60"].reset_index(drop=True),
+                train_dates=merged.loc[train_mask, "trade_date"].reset_index(drop=True),
+                val_dates=merged.loc[val_mask, "trade_date"].reset_index(drop=True),
+                train_codes=merged.loc[train_mask, "ts_code"].reset_index(drop=True),
+                val_codes=merged.loc[val_mask, "ts_code"].reset_index(drop=True),
+                train_groups=train_groups,
+                val_groups=val_groups,
+            )
 
         return DatasetResult(
             X_train=X_train,
