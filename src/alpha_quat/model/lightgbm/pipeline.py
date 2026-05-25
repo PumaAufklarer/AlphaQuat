@@ -54,6 +54,34 @@ class LightGBMPipeline:
 
         for h_name, y_tr, y_val in horizons:
             results[h_name] = {}
+            lr = self.config.lambdarank
+
+            if lr:
+                label = f"{h_name}_lambdarank"
+                logger.info("Training lambdarank %s...", label)
+                model, params = self.trainer.train(
+                    data.X_train,
+                    y_tr,
+                    label,
+                    lambdarank=True,
+                    groups=data.train_groups,
+                )
+                logger.info("Evaluating %s...", label)
+                result = self.evaluator.evaluate(
+                    model,
+                    data.X_val,
+                    y_val,
+                    data.val_dates,
+                    data.val_codes,
+                    params,
+                    self.config.feature_names,
+                    label,
+                )
+                results[h_name][label] = result
+                output_dir = self.data_dir / "models"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                model.save_model(str(output_dir / f"lightgbm_model_{label}.txt"))
+                continue
             for alpha in alphas:
                 suffix = self._suffix(h_name, alpha)
                 label = suffix

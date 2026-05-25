@@ -20,7 +20,24 @@ class LightGBMTrainer:
     def __init__(self, config: LightGBMConfig):
         self.config = config
 
-    def _base_params(self, quantile_alpha: float | None = None) -> dict:
+    def _base_params(
+        self, quantile_alpha: float | None = None, lambdarank: bool = False
+    ) -> dict:
+        if lambdarank:
+            return {
+                "objective": "lambdarank",
+                "metric": "ndcg",
+                "ndcg_eval_at": [5, 10],
+                "label_gain": [i for i in range(10)],
+                "num_leaves": self.config.num_leaves,
+                "learning_rate": self.config.learning_rate,
+                "n_estimators": self.config.n_estimators,
+                "feature_fraction": self.config.feature_fraction,
+                "bagging_fraction": self.config.bagging_fraction,
+                "verbose": self.config.verbosity,
+                "random_state": self.config.random_state,
+                "n_jobs": self.config.n_jobs,
+            }
         if quantile_alpha is not None:
             return {
                 "objective": "quantile",
@@ -56,9 +73,15 @@ class LightGBMTrainer:
         X_val: pd.DataFrame,
         y_val: pd.Series,
         n_estimators: int,
+        tr_groups: list[int] | None = None,
+        val_groups: list[int] | None = None,
     ) -> lgb.Booster:
         train_data = lgb.Dataset(X_tr, label=y_tr)
+        if tr_groups:
+            train_data.set_group(tr_groups)
         valid_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
+        if val_groups:
+            valid_data.set_group(val_groups)
 
         callbacks = [
             lgb.early_stopping(self.config.early_stopping_rounds, verbose=False),
@@ -74,20 +97,28 @@ class LightGBMTrainer:
             callbacks=callbacks,
         )
 
-    def _train_lgb(
-        self,
-        params: dict,
-        X: pd.DataFrame,
-        y: pd.Series,
-        n_estimators: int | None = None,
-    ) -> lgb.Booster:
-        n_est = n_estimators if n_estimators is not None else self.config.n_estimators
-        n_total = len(X)
-        split_idx = int(n_total * 0.9)
-        X_tr, X_ev = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_tr, y_ev = y.iloc[:split_idx], y.iloc[split_idx:]
+    def _split_by_groups(
+        self, groups: list[int], ratio: float = 0.9
+    ) -> tuple[list[int], list[int], int]:
+        split_n = max(1, int(len(groups) * ratio))
+        if split_n >= len(groups):
+            split_n = len(groups) - 1
+        split_row = sum(groups[:split_n])
+        return groups[:split_n], groups[split_n:], split_row
 
-        return self._fit(params, X_tr, y_tr, X_ev, y_ev, n_est)
+    def _objective_lambdarank(
+        self, trial: optuna.Trial, X: pd.DataFrame, y: pd.Series, groups: list[int]
+    ) -> float:
+        params = self._base_params(lambdarank=True)
+        n_est = trial.suggest_int("n_estimators", 100, 500)
+
+        train_g, val_g, split = self._split_by_groups(groups)
+        X_tr, X_val = X.iloc[:split], X.iloc[split:]
+        y_tr, y_val = y.iloc[:split], y.iloc[split:]
+
+        model = self._fit(params, X_tr, y_tr, X_val, y_val, n_est, train_g, val_g)
+        y_pred = np.asarray(model.predict(X_val), dtype=float)
+        return float(np.mean((y_val.values - y_pred) ** 2))
 
     def _objective(
         self,
@@ -117,15 +148,12 @@ class LightGBMTrainer:
         for train_idx, val_idx in tscv.split(X):
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
             y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
-
             model = self._fit(params, X_tr, y_tr, X_val, y_val, n_est)
             y_pred = np.asarray(model.predict(X_val), dtype=float)
-
             if quantile_alpha is not None:
                 scores.append(pinball_loss(y_val.values, y_pred, quantile_alpha))
             else:
                 scores.append(float(((y_val.values - y_pred) ** 2).mean()))
-
         return float(np.mean(scores))
 
     def train(
@@ -134,16 +162,64 @@ class LightGBMTrainer:
         y: pd.Series,
         label_name: str = "",
         quantile_alpha: float | None = None,
+        lambdarank: bool = False,
+        groups: list[int] | None = None,
     ) -> tuple[lgb.Booster, dict]:
-        params = self._base_params(quantile_alpha)
-        metric_name = "pinball" if quantile_alpha is not None else "MSE"
+        if lambdarank:
+            params = self._base_params(lambdarank=True)
+            if self.config.tune:
+                study = optuna.create_study(
+                    direction="minimize",
+                    sampler=optuna.samplers.TPESampler(seed=self.config.random_state),
+                )
+                study.optimize(
+                    lambda trial: self._objective_lambdarank(trial, X, y, groups or []),
+                    n_trials=self.config.n_trials,
+                    show_progress_bar=False,
+                )
+                best_params = self._base_params(lambdarank=True)
+                best_params.update(study.best_params)
+                logger.info(
+                    "Best lambdarank (%s): MSE=%.6f", label_name, study.best_value
+                )
 
+                tr_g, val_g, split = self._split_by_groups(groups or [])
+                model = self._fit(
+                    best_params,
+                    X.iloc[:split],
+                    y.iloc[:split],
+                    X.iloc[split:],
+                    y.iloc[split:],
+                    best_params.get("n_estimators", 200),
+                    tr_g,
+                    val_g,
+                )
+                best_params["best_iteration"] = model.best_iteration
+                return model, best_params
+            else:
+                tr_g, val_g, split = self._split_by_groups(groups or [])
+                logger.info(
+                    "Training lambdarank (%s): %d groups, %d samples",
+                    label_name,
+                    len(tr_g),
+                    split,
+                )
+                model = self._fit(
+                    params,
+                    X.iloc[:split],
+                    y.iloc[:split],
+                    X.iloc[split:],
+                    y.iloc[split:],
+                    self.config.n_estimators,
+                    tr_g,
+                    val_g,
+                )
+                params["best_iteration"] = model.best_iteration
+                return model, params
+
+        # Non-lambdarank path
+        params = self._base_params(quantile_alpha)
         if self.config.tune:
-            logger.info(
-                "Starting Optuna hyperparameter tuning (%s), %d trials",
-                label_name,
-                self.config.n_trials,
-            )
             study = optuna.create_study(
                 direction="minimize",
                 sampler=optuna.samplers.TPESampler(seed=self.config.random_state),
@@ -155,21 +231,29 @@ class LightGBMTrainer:
             )
             best_params = self._base_params(quantile_alpha)
             best_params.update(study.best_params)
-            logger.info(
-                "Best trial (%s): %s=%.6f, params=%s",
-                label_name,
-                metric_name,
-                study.best_value,
-                study.best_params,
-            )
-
-            model = self._train_lgb(
-                best_params, X, y, n_estimators=best_params.get("n_estimators")
-            )
+            model = self._train_lgb(best_params, X, y, best_params.get("n_estimators"))
             best_params["best_iteration"] = model.best_iteration
             return model, best_params
         else:
-            logger.info("Training LightGBM with base params (%s)", label_name)
             model = self._train_lgb(params, X, y)
             params["best_iteration"] = model.best_iteration
             return model, params
+
+    def _train_lgb(
+        self,
+        params: dict,
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_estimators: int | None = None,
+    ) -> lgb.Booster:
+        n_est = n_estimators or self.config.n_estimators
+        n_total = len(X)
+        split_idx = int(n_total * 0.9)
+        return self._fit(
+            params,
+            X.iloc[:split_idx],
+            y.iloc[:split_idx],
+            X.iloc[split_idx:],
+            y.iloc[split_idx:],
+            n_est,
+        )

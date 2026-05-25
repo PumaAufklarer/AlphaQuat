@@ -318,6 +318,11 @@ def _build_model_parser(subparsers):
         default=None,
         help="Meta model training end YYYYMMDD (e.g. 20230330)",
     )
+    lgb_parser.add_argument(
+        "--lambdarank",
+        action="store_true",
+        help="Train with lambdarank objective (ranking, not regression)",
+    )
     return model_parser
 
 
@@ -338,6 +343,7 @@ def _cmd_model(args, config):
             quantile_alphas=[0.1, 0.5, 0.9] if args.quantile else None,
             meta_start=args.meta_start,
             meta_end=args.meta_end,
+            lambdarank=args.lambdarank,
         )
         pipeline = LightGBMPipeline(config.data_dir, cfg)
         pipeline.run()

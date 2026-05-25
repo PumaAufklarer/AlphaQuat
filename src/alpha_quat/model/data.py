@@ -24,6 +24,8 @@ class DatasetResult:
     val_dates: pd.Series
     train_codes: pd.Series
     val_codes: pd.Series
+    train_groups: list[int] | None = None
+    val_groups: list[int] | None = None
 
 
 class DatasetBuilder:
@@ -173,6 +175,20 @@ class DatasetBuilder:
 
         merged["trade_date"] = merged["trade_date"].astype(str)
 
+        # Discretize labels for lambdarank (10 quantile bins per trade_date)
+        for col in ["ret_5d", "ret_20d", "ret_60d"]:
+            merged[col] = merged.groupby("trade_date")[col].transform(
+                lambda g: (
+                    pd.qcut(g, 10, labels=False, duplicates="drop")
+                    if len(g) >= 10
+                    else pd.Categorical(
+                        pd.qcut(g, min(len(g), 5), labels=False, duplicates="drop")
+                    ).astype(int)
+                )
+            )
+            merged = merged.dropna(subset=[col])
+            merged[col] = merged[col].astype(int)
+
         train_mask = (merged["trade_date"] >= train_start) & (
             merged["trade_date"] <= train_end
         )
@@ -182,6 +198,13 @@ class DatasetBuilder:
 
         X_train = merged.loc[train_mask, factor_cols].reset_index(drop=True)
         X_val = merged.loc[val_mask, factor_cols].reset_index(drop=True)
+
+        train_groups = (
+            merged.loc[train_mask].groupby("trade_date", sort=False).size().tolist()
+        )
+        val_groups = (
+            merged.loc[val_mask].groupby("trade_date", sort=False).size().tolist()
+        )
 
         return DatasetResult(
             X_train=X_train,
@@ -196,4 +219,6 @@ class DatasetBuilder:
             val_dates=merged.loc[val_mask, "trade_date"].reset_index(drop=True),
             train_codes=merged.loc[train_mask, "ts_code"].reset_index(drop=True),
             val_codes=merged.loc[val_mask, "ts_code"].reset_index(drop=True),
+            train_groups=train_groups,
+            val_groups=val_groups,
         )
