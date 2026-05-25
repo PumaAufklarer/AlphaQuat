@@ -30,6 +30,9 @@ ALL_SOURCES = {
 
 ALL_FEATURE_SETS = {
     "alpha158": "alpha_quat.features.alphasets.alpha158:build_alpha158",
+    "alpha_ext": "alpha_quat.features.alphasets.alpha_ext:build_alpha_ext",
+    "alpha_fund": "alpha_quat.features.alphasets.alpha_fund:build_alpha_fund",
+    "alpha_combined": "alpha_quat.features.alphasets:build_alpha_combined",
 }
 
 

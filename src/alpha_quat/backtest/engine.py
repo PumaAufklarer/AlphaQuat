@@ -189,7 +189,7 @@ class BacktestEngine:
                     score_cut = None
                     if self.config.sell_score_percentile is not None:
                         score_cut = all_scores.quantile(
-                            1 - self.config.sell_score_percentile
+                            self.config.sell_score_percentile
                         )
                         if isinstance(score_cut, pd.Series):
                             score_cut = float(score_cut.iloc[0])
