@@ -78,11 +78,26 @@ class FeatureEngine:
         sql = self._base_cte_range(min_date, max_date, margin)
         prev = "raw"
 
+        # If any factor needs __rn/__pN/__diff (for EMA/REG_SLOPE/RSI), add helpers
+        needs_rn = any(
+            "__rn" in e or "__p" in e or "__diff" in e for e in ts_exprs + rank_exprs
+        )
+        if needs_rn:
+            sql += ", _rn AS (\n  SELECT *, ROW_NUMBER() OVER w_time AS __rn,\n"
+            sql += "    close - LAG(close, 1) OVER w_time AS __diff\n"
+            sql += "  FROM raw\n"
+            sql += "  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)\n)"
+            # Pre-compute row positions within windows
+            positions = [
+                f"__rn - MIN(__rn) OVER (w_time ROWS BETWEEN {w - 1} PRECEDING AND CURRENT ROW) AS __p{w}"
+                for w in [5, 10, 12, 14, 20, 26, 30, 60]
+            ]
+            sql += ", _rp AS (\n  SELECT *, " + ",\n    ".join(positions)
+            sql += "\n  FROM _rn\n  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)\n)"
+            prev = "_rp"
+
         if ts_exprs:
-            # Check if any factor uses EMA or REG_SLOPE (needs __rn)
-            has_rn = any("__rn" in e for e in ts_exprs)
-            rn_col = ",\n    ROW_NUMBER() OVER w_time AS __rn" if has_rn else ""
-            sql += f", _ts AS (\n  SELECT *{rn_col},\n    "
+            sql += f", _ts AS (\n  SELECT *,\n    "
             sql += ",\n    ".join(ts_exprs)
             sql += f"\n  FROM {prev}\n  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)\n)"
             prev = "_ts"

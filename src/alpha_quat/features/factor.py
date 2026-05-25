@@ -150,11 +150,11 @@ def compile(expression: str) -> str:
         expr,
     )
 
-    # === New operators: EMA, REG_SLOPE (need __rn), RSI ===
+    # === New operators: EMA, REG_SLOPE (need __rn/__pN), RSI ===
     expr = re.sub(
         r"EMA\((\w+),\s*(\d+)\)",
         lambda m: (
-            f"""SUM({m.group(1)} * POW({(int(m.group(2)) - 1) / (int(m.group(2)) + 1)}, __rn - MIN(__rn) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW))) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW) / SUM(POW({(int(m.group(2)) - 1) / (int(m.group(2)) + 1)}, __rn - MIN(__rn) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW))) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW)"""
+            f"""SUM({m.group(1)} * POW({(int(m.group(2)) - 1) / (int(m.group(2)) + 1)}, __p{int(m.group(2))})) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW) / SUM(POW({(int(m.group(2)) - 1) / (int(m.group(2)) + 1)}, __p{int(m.group(2))})) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW)"""
         ),
         expr,
     )
@@ -168,7 +168,7 @@ def compile(expression: str) -> str:
     expr = re.sub(
         r"RSI\((\w+),\s*(\d+)\)",
         lambda m: (
-            f"""100.0 - 100.0 / (1.0 + AVG(CASE WHEN {m.group(1)} > LAG({m.group(1)}, 1) OVER (PARTITION BY ts_code ORDER BY trade_date) THEN {m.group(1)} - LAG({m.group(1)}, 1) OVER (PARTITION BY ts_code ORDER BY trade_date) ELSE 0.0 END) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW) / NULLIF(AVG(CASE WHEN {m.group(1)} < LAG({m.group(1)}, 1) OVER (PARTITION BY ts_code ORDER BY trade_date) THEN LAG({m.group(1)}, 1) OVER (PARTITION BY ts_code ORDER BY trade_date) - {m.group(1)} ELSE 0.0 END) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW), 0.0))"""
+            f"""100.0 - 100.0 / (1.0 + AVG(CASE WHEN __diff > 0 THEN __diff ELSE 0.0 END) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW) / NULLIF(AVG(CASE WHEN __diff < 0 THEN -__diff ELSE 0.0 END) OVER (w_time ROWS BETWEEN {int(m.group(2)) - 1} PRECEDING AND CURRENT ROW), 0.0))"""
         ),
         expr,
     )

@@ -115,9 +115,11 @@ data/
 
 - `$open`, `$high`, `$low`, `$close`, `$volume`, `$amount`, `$vwap` — OHLCV from `daily/`
 - `$pe_ttm`, `$pb`, `$total_mv`, `$turnover_rate`, `$volume_ratio` — fundamentals from `daily_basic/` (joined in base CTE)
-- Operators: `REF(f,N)`, `MEAN(f,N)`, `STD(f,N)`, `SUM(f,N)`, `MAX(f,N)`, `MIN(f,N)`, `CORR(a,b,N)`, `DELTA(f,N)`, `RANK(f)`, `QUANTILE(f,N)`
+- Operators: `REF(f,N)`, `MEAN(f,N)`, `STD(f,N)`, `SUM(f,N)`, `MAX(f,N)`, `MIN(f,N)`, `CORR(a,b,N)`, `DELTA(f,N)`, `RANK(f)`, `QUANTILE(f,N)`, `EMA(f,N)`, `RSI(f,N)`, `REG_SLOPE(f,N)`
 
 **FeatureEngine base CTE** joins `daily/` LEFT JOIN `daily_basic/` on `(ts_code, trade_date)`. If no daily_basic files exist, the columns are filled with NULL (backward-compatible with tests).
+
+New operators (`EMA`, `RSI`, `REG_SLOPE`) use pre-computed `__rn`, `__p{N}` positions and `__diff` columns in a `_rn`/`_rp` CTE before `_ts` to avoid DuckDB nested window function errors.
 
 ### Feature pipeline gotchas
 
@@ -136,6 +138,8 @@ data/
 | `lightgbm/evaluate.py` | `LightGBMEvaluator` — MSE/MAE, per-date Spearman Rank IC, ICIR, feature importance (gain) top5/bottom5 |
 | `lightgbm/pipeline.py` | `LightGBMPipeline` — orchestrator: build → train 3 models → evaluate → save models + results.json |
 | `predict.py` | `predict()` — daily inference: load models + latest features, score universe, show top-K and holdings ranking |
+| `meta.py` | `Meta model (stacking)` — learns to combine 9 quantile predictions, trained after base models |
+| `rolling.py` | `Rolling backtest` — 8-fold expanding window retrain + backtest (6-month intervals) |
 
 **Labels:** Channel position — `(close_{t+n} - min_low_{t:t+n}) / (max_high_{t:t+n} - min_low_{t:t+n})`. Values in [0,1]. Computed via LEAD + MIN/MAX window functions (O(n)), NOT range joins.
 
@@ -145,10 +149,10 @@ data/
 
 - **DatasetBuilder uses DuckDB** — not pandas. Parquet reads use `union_by_name=true` + explicit CAST to handle stock_st schema drift across files.
 - **Label columns excluded** — `factor_cols` filter uses `c != "ts_code" and not c.startswith("trade_date")`, so `ret_5d`/`ret_20d`/`ret_60d` columns don't leak into features.
-- **Feature rebuild before model** — new factors require `uv run alpha-quat feature --rebuild` before training.
-- **--rebuild --since combo** — now works: `--rebuild --since 20180101` clears old files then computes from 2018 onward.
 - **max_offset=60** for 60d labels — needs 60 extra trading days of daily data for LEAD(close,60).
 - **Holdings YAML** — `data/holdings.yaml` stores current portfolio with ts_code, shares, avg_cost. Used by `alpha-quat predict`.
+- **Feature rebuild before model** — new factors require `uv run alpha-quat feature --rebuild` before training.
+- **--rebuild --since combo** — now works: `--rebuild --since 20180101` clears old files then computes from 2018 onward.
 
 ## Architecture: strategy (`src/alpha_quat/strategy/`)
 
@@ -208,6 +212,12 @@ StrategyResult(target_positions, orders, metadata)
 **Rebalance modes (ML):**
 - `rebalance_interval=N` — rebalance every N trading days (5=weekly, 10=bi-weekly). On rebalance day: compute target=Top-K, sell stocks outside Top-K with score < sell_threshold (default 0.40).
 - `--daily-monitor` — continuous daily mode. Score daily → sell holdings below sell_score_percentile (e.g. 0.20 = bottom 20%) or hit stop-loss → buy highest-scored not-held stock.
+
+**Position sizing:**
+- `--weighting equal` — equal weights (default, best performance)
+- `--weighting kelly` — proportional to mean/var ratio (higher return, higher risk)
+- `--weighting vol_parity` — proportional to 1/volatility (lowest drawdown)
+- `--weighting score_momentum` — bonus for repeated Top-K appearances
 
 **Existing strategy implementations:**
 - `strategy/signals/ma_cross.py` — `MACrossSignal`: golden/dead cross detection via `KLEN35`/`KLEN36` factors

@@ -111,7 +111,7 @@ class TestCompile:
         result = compile("EMA($close, 5)")
         assert "SUM(close * POW" in result
         assert "OVER (w_time ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)" in result
-        assert "__rn" in result
+        assert "__p5" in result
 
     def test_reg_slope(self):
         result = compile("REG_SLOPE($close, 10)")
@@ -121,5 +121,5 @@ class TestCompile:
     def test_rsi(self):
         result = compile("RSI($close, 14)")
         assert "100.0 - 100.0" in result
-        assert "CASE WHEN close > LAG(close, 1)" in result
+        assert "__diff > 0" in result
         assert "OVER (w_time ROWS BETWEEN 13 PRECEDING AND CURRENT ROW)" in result
