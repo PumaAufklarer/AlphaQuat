@@ -24,3 +24,5 @@ class LightGBMConfig:
     feature_names: list[str] | None = None
 
     quantile_alphas: list[float] | None = field(default_factory=lambda: None)
+    meta_start: str | None = None
+    meta_end: str | None = None

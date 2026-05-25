@@ -308,6 +308,16 @@ def _build_model_parser(subparsers):
         action="store_true",
         help="Train quantile regression models (10%/50%/90% instead of point estimates)",
     )
+    lgb_parser.add_argument(
+        "--meta-start",
+        default=None,
+        help="Meta model training start YYYYMMDD (e.g. 20220401)",
+    )
+    lgb_parser.add_argument(
+        "--meta-end",
+        default=None,
+        help="Meta model training end YYYYMMDD (e.g. 20230330)",
+    )
     return model_parser
 
 
@@ -326,6 +336,8 @@ def _cmd_model(args, config):
             tune=not args.no_tune,
             feature_names=feature_names,
             quantile_alphas=[0.1, 0.5, 0.9] if args.quantile else None,
+            meta_start=args.meta_start,
+            meta_end=args.meta_end,
         )
         pipeline = LightGBMPipeline(config.data_dir, cfg)
         pipeline.run()

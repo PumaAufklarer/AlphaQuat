@@ -49,6 +49,8 @@ class LightGBMPipeline:
         ]
         alphas = self.config.quantile_alphas or [None]
         results: dict[str, dict[str, EvalResult]] = {}
+        output_dir = self.data_dir / "models"
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         for h_name, y_tr, y_val in horizons:
             results[h_name] = {}
@@ -81,6 +83,34 @@ class LightGBMPipeline:
 
         self._save_results(results)
         self._print_summary(results)
+
+        # Meta model training (stacking layer on top of base models)
+        if self.config.quantile_alphas and self.config.meta_start:
+            logger.info("Training meta models (stacking layer)...")
+            from alpha_quat.model.meta import (
+                build_meta_features,
+                train_meta_model,
+            )
+
+            assert self.config.meta_start and self.config.meta_end
+            meta_train_df, meta_val_df = build_meta_features(
+                data_dir=self.data_dir,
+                model_dir=output_dir,
+                train_start=self.config.meta_start,
+                train_end=self.config.meta_end,
+                val_start=self.config.val_start,
+                val_end=self.config.val_end,
+            )
+
+            for h in ["5d", "20d", "60d"]:
+                train_meta_model(
+                    meta_train_df,
+                    meta_val_df,
+                    horizon=h,
+                    output_dir=output_dir,
+                    tune=False,
+                )
+            logger.info("Meta training complete")
 
         return results
 
