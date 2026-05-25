@@ -1,4 +1,8 @@
-"""MLSignalGenerator — scores stocks using ensemble of 3 LightGBM models."""
+"""MLSignalGenerator — scores stocks using ensemble of 3 LightGBM models.
+
+Supports both point-estimate (regression) and quantile regression models.
+Quantile median models (alpha=0.5) are used when available.
+"""
 
 import logging
 from pathlib import Path
@@ -12,11 +16,7 @@ from alpha_quat.strategy.types import SignalResult, StrategyContext
 
 logger = logging.getLogger(__name__)
 
-_WEIGHTS = {
-    "ret_5d": 0.35,
-    "ret_20d": 0.32,
-    "ret_60d": 0.33,
-}
+_WEIGHTS = {"5d": 0.35, "20d": 0.32, "60d": 0.33}
 
 
 class MLSignalGenerator(ISignalGenerator):
@@ -26,13 +26,27 @@ class MLSignalGenerator(ISignalGenerator):
         self.top_k = top_k
         self.model_dir = Path(model_dir)
         self.models: dict[str, lgb.Booster] = {}
-        for label in ["ret_5d", "ret_20d", "ret_60d"]:
-            path = model_dir / f"lightgbm_model_{label.replace('ret_', '')}.txt"
-            if path.exists():
-                self.models[label] = lgb.Booster(model_file=str(path))
-                logger.info("Loaded %s from %s", label, path)
-            else:
-                logger.warning("Model %s not found at %s", label, path)
+
+        # Detect quantile mode: look for median models
+        has_quantile = all(
+            (model_dir / f"lightgbm_model_{h}_alpha_0.5.txt").exists()
+            for h in ["5d", "20d", "60d"]
+        )
+
+        if has_quantile:
+            logger.info("Quantile mode: loading median (alpha=0.5) models")
+            for h in ["5d", "20d", "60d"]:
+                path = model_dir / f"lightgbm_model_{h}_alpha_0.5.txt"
+                if path.exists():
+                    self.models[h] = lgb.Booster(model_file=str(path))
+                    logger.info("Loaded %s from %s", h, path)
+        else:
+            logger.info("Regression mode: loading point-estimate models")
+            for h in ["5d", "20d", "60d"]:
+                path = model_dir / f"lightgbm_model_{h}.txt"
+                if path.exists():
+                    self.models[h] = lgb.Booster(model_file=str(path))
+                    logger.info("Loaded %s from %s", h, path)
 
         if not self.models:
             raise FileNotFoundError(f"No models found in {model_dir}")
