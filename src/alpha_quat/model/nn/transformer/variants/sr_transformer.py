@@ -56,9 +56,8 @@ def run_sr_transformer(data_dir: Path, config: ExperimentConfig) -> dict:
         json.dump(dataclasses.asdict(tr_cfg), f, indent=2)
 
     # Save norm params for inference
-    norm_save = {k: list(v) for k, v in norm_params.items()}
     with open(exp_dir / "norm_params.json", "w") as f:
-        json.dump(norm_save, f, indent=2)
+        json.dump(norm_params, f, indent=2)
 
     # Evaluate
     metrics = evaluate(model, val_ds, tr_cfg)

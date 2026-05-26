@@ -23,6 +23,8 @@ class SRInference:
         self.config = TransformerConfig(**cfg_dict)
         with open(model_dir / "norm_params.json") as f:
             self.norm_params = json.load(f)
+        self._log_vol_mean = self.norm_params.get("log_vol_mean", 0.0)
+        self._log_vol_std = self.norm_params.get("log_vol_std", 1.0)
 
         self.model = StockTransformer(
             n_features=self.config.n_features,
@@ -40,27 +42,29 @@ class SRInference:
         self.model.to(_DEVICE)
         self.model.eval()
 
+    def _normalize(self, x: np.ndarray) -> np.ndarray:
+        """Per-sequence normalization: price ratios + log volume."""
+        out = x.copy().astype(np.float32)
+        close_last = out[-1, 3]
+        if close_last <= 0:
+            close_last = 1.0
+
+        out[:, 0] = out[:, 0] / close_last - 1
+        out[:, 1] = out[:, 1] / close_last - 1
+        out[:, 2] = out[:, 2] / close_last - 1
+        out[:, 3] = out[:, 3] / close_last - 1
+        out[:, 5] = out[:, 5] / close_last - 1
+        out[:, 4] = (np.log1p(out[:, 4]) - self._log_vol_mean) / self._log_vol_std
+        return out
+
     def predict(self, sequence: np.ndarray) -> dict[str, np.ndarray]:
-        """Predict SR distributions for a (60, 6) sequence.
+        """Predict SR distributions for a (60, 6) sequence."""
+        seq = self._normalize(sequence)
 
-        Args:
-            sequence: (60, 6) array [open, high, low, close, volume, vwap]
-
-        Returns:
-            dict with keys: resistance_5d, resistance_20d, resistance_60d,
-                            support_5d, support_20d, support_60d
-            Each value is a (100,) probability array.
-        """
-        # Normalize
-        seq = sequence.copy().astype(np.float32)
-        for i, col in enumerate(_FEATURE_COLS):
-            mean, std = self.norm_params[col]
-            seq[:, i] = (seq[:, i] - mean) / std
-
-        x = torch.from_numpy(seq).unsqueeze(0).to(_DEVICE)  # (1, 60, 6)
+        x = torch.from_numpy(seq).unsqueeze(0).to(_DEVICE)
         with torch.no_grad():
-            logits = self.model(x)  # (1, 6, n_bins)
-        probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]  # (6, n_bins)
+            logits = self.model(x)
+        probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
 
         names = [
             "resistance_5d",
@@ -72,21 +76,11 @@ class SRInference:
         ]
         return {name: probs[i] for i, name in enumerate(names)}
 
-    def compute_entry_exit(
-        self,
-        sequence: np.ndarray,
-        close_price: float,
-    ) -> dict:
-        """Compute entry/exit signals from SR predictions.
-
-        Returns:
-            dict with keys: rr_ratio, entry, exit, expected_up, expected_down
-        """
+    def compute_entry_exit(self, sequence: np.ndarray, close_price: float) -> dict:
+        """Compute entry/exit signals from SR predictions."""
         probs = self.predict(sequence)
         n_bins = self.config.n_bins
         price_range = self.config.price_range
-
-        # Expected bin value for each distribution
         bin_centers = np.linspace(-price_range, price_range, n_bins)
 
         expected_resistance = {
@@ -98,19 +92,16 @@ class SRInference:
             for h in ["5d", "20d", "60d"]
         }
 
-        # Use 5d for nearest-term signals
         expected_up = expected_resistance["5d"]
         expected_down = -expected_support["5d"]
         rr_ratio = expected_up / max(expected_down, 1e-6)
 
-        # Entry: good risk/reward + close near support
         near_support_mask = (bin_centers > expected_support["5d"] - 0.01) & (
             bin_centers < expected_support["5d"] + 0.01
         )
         support_confidence = float(probs["support_5d"][near_support_mask].sum())
         entry = rr_ratio > 2.0 and support_confidence > 0.1
 
-        # Exit: price approaching resistance
         near_resistance_mask = (bin_centers > expected_resistance["5d"] - 0.01) & (
             bin_centers < expected_resistance["5d"] + 0.01
         )

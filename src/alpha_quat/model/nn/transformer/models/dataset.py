@@ -1,3 +1,5 @@
+"""Dataset builder — per-sequence normalization, class-index labels."""
+
 import logging
 from pathlib import Path
 
@@ -28,7 +30,6 @@ def _load_alpha360_range(data_dir: Path, start: str, end: str) -> pd.DataFrame:
     )
     if not all_dates:
         raise FileNotFoundError(f"No alpha360 cache found for {start}~{end}")
-
     chunks = []
     for d in all_dates:
         df = pd.read_parquet(cache_dir / f"{d}.parquet")
@@ -37,45 +38,51 @@ def _load_alpha360_range(data_dir: Path, start: str, end: str) -> pd.DataFrame:
     return pd.concat(chunks, ignore_index=True)
 
 
-def _compute_norm_params(df: pd.DataFrame) -> dict[str, tuple[float, float]]:
-    params = {}
-    for col in _FEATURE_COLS:
-        vals = df[col].dropna().values
-        if len(vals) == 0:
-            params[col] = (0.0, 1.0)
-        else:
-            params[col] = (float(vals.mean()), float(vals.std() + 1e-8))
-    for col in _SR_PRICE_COLS:
-        vals = df[col].dropna().values
-        if len(vals) == 0:
-            params[col] = (0.0, 1.0)
-        else:
-            params[col] = (float(vals.mean()), float(vals.std() + 1e-8))
-    return params
+def _compute_log_vol_stats(df: pd.DataFrame) -> tuple[float, float]:
+    """Compute mean/std of log(1+volume) across training set."""
+    vol = df["volume"].dropna().values
+    log_vol = np.log1p(vol)
+    return float(log_vol.mean()), float(log_vol.std() + 1e-8)
 
 
-def _normalize(
-    df: pd.DataFrame, params: dict[str, tuple[float, float]]
-) -> pd.DataFrame:
-    df = df.copy()
-    for col, (mean, std) in params.items():
-        if col in df.columns:
-            df[col] = (df[col] - mean) / std
-    return df
+def _normalize_sequence(
+    x: np.ndarray, log_vol_mean: float, log_vol_std: float
+) -> np.ndarray:
+    """Normalize a (60, 6) sequence: price ratios + log volume."""
+    out = x.copy().astype(np.float32)
+    close_last = out[-1, 3]
+    if close_last <= 0:
+        close_last = 1.0
+
+    # Price features → relative to last close
+    out[:, 0] = out[:, 0] / close_last - 1  # open
+    out[:, 1] = out[:, 1] / close_last - 1  # high
+    out[:, 2] = out[:, 2] / close_last - 1  # low
+    out[:, 3] = out[:, 3] / close_last - 1  # close
+    out[:, 5] = out[:, 5] / close_last - 1  # vwap
+
+    # Volume → log transform + z-score
+    out[:, 4] = (np.log1p(out[:, 4]) - log_vol_mean) / log_vol_std
+
+    return out
 
 
 def _build_sequences(
-    df: pd.DataFrame, seq_length: int, stride: int, n_bins: int, price_range: float
+    df: pd.DataFrame,
+    seq_length: int,
+    stride: int,
+    n_bins: int,
+    price_range: float,
+    log_vol_mean: float,
+    log_vol_std: float,
 ):
     """Build (X, y, weight) sequences from per-stock data.
 
-    X: (seq_length, 6) normalized features
-    y: (6,) int64 — correct bin index per horizon, 0 for invalid
+    X: (seq_length, 6) — per-sequence normalized
+    y: (6,) int64 — correct bin index per horizon
     weight: (6,) float32 — distance-decayed weight, 0 for invalid
     """
-    features = []
-    labels = []
-    weights = []
+    features, labels, weights = [], [], []
 
     for ts_code, stock_df in df.groupby("ts_code"):
         stock_df = stock_df.sort_values("trade_date").reset_index(drop=True)
@@ -84,7 +91,7 @@ def _build_sequences(
         sr_dists = stock_df[_SR_DIST_COLS].to_numpy(dtype=np.float32)
 
         for i in range(0, len(stock_df) - seq_length, stride):
-            x = vals[i : i + seq_length]
+            x = vals[i : i + seq_length].copy()
             prices = sr_prices[i + seq_length - 1]
             dists = sr_dists[i + seq_length - 1]
 
@@ -92,6 +99,8 @@ def _build_sequences(
                 continue
             if np.isnan(prices).all():
                 continue
+
+            x = _normalize_sequence(x, log_vol_mean, log_vol_std)
 
             valid = ~np.isnan(prices)
             y = np.zeros(6, dtype=np.int64)
@@ -104,7 +113,6 @@ def _build_sequences(
                     bin_idx = int((ratio / price_range + 1) * n_bins / 2)
                     bin_idx = max(0, min(n_bins - 1, bin_idx))
                     y[j] = bin_idx
-                    # Weight: nearer peaks matter more, half-life ~5 trading days
                     w[j] = 1.0 / (1.0 + dists[j] / 5.0)
 
             features.append(x)
@@ -114,10 +122,7 @@ def _build_sequences(
     if not features:
         raise ValueError("No valid sequences built")
 
-    X = np.stack(features)
-    Y = np.stack(labels)
-    W = np.stack(weights)
-    return X, Y, W
+    return np.stack(features), np.stack(labels), np.stack(weights)
 
 
 class SRSequenceDataset(Dataset):
@@ -148,11 +153,9 @@ def build_datasets(
     val_df = _load_alpha360_range(data_dir, config.val_start, config.val_end)
     logger.info("Val data: %d rows", len(val_df))
 
-    combined = pd.concat([train_df, val_df], ignore_index=True)
-    norm_params = _compute_norm_params(combined)
-
-    train_norm = _normalize(train_df, norm_params)
-    val_norm = _normalize(val_df, norm_params)
+    # Log-volume stats from training set only
+    log_vol_mean, log_vol_std = _compute_log_vol_stats(train_df)
+    norm_params = {"log_vol_mean": log_vol_mean, "log_vol_std": log_vol_std}
 
     logger.info(
         "Building train sequences (seq=%d, stride=%d)...",
@@ -160,13 +163,25 @@ def build_datasets(
         config.stride,
     )
     X_tr, Y_tr, W_tr = _build_sequences(
-        train_norm, config.seq_length, config.stride, config.n_bins, config.price_range
+        train_df,
+        config.seq_length,
+        config.stride,
+        config.n_bins,
+        config.price_range,
+        log_vol_mean,
+        log_vol_std,
     )
     logger.info("Train: %d sequences", len(X_tr))
 
     logger.info("Building val sequences...")
     X_val, Y_val, W_val = _build_sequences(
-        val_norm, config.seq_length, config.stride, config.n_bins, config.price_range
+        val_df,
+        config.seq_length,
+        config.stride,
+        config.n_bins,
+        config.price_range,
+        log_vol_mean,
+        log_vol_std,
     )
     logger.info("Val: %d sequences", len(X_val))
 

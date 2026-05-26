@@ -1,11 +1,11 @@
-"""Tests for SR dataset building."""
+"""Tests for SR dataset — per-sequence normalization."""
 
 import numpy as np
 import pandas as pd
 
 from alpha_quat.model.nn.transformer.models.dataset import (
-    _compute_norm_params,
-    _normalize,
+    _compute_log_vol_stats,
+    _normalize_sequence,
     _build_sequences,
 )
 
@@ -44,28 +44,35 @@ def _make_synthetic_alpha360(n_stocks=2, n_days=100):
     return pd.DataFrame(rows)
 
 
-def test_compute_norm_params():
-    df = _make_synthetic_alpha360(n_stocks=2, n_days=50)
-    params = _compute_norm_params(df)
-    for col in ["open", "high", "low", "close", "volume", "vwap"]:
-        assert col in params
-        assert len(params[col]) == 2
-
-
-def test_normalize():
+def test_log_vol_stats():
     df = _make_synthetic_alpha360(n_stocks=1, n_days=50)
-    params = _compute_norm_params(df)
-    normed = _normalize(df, params)
-    for col in ["open", "close"]:
-        assert abs(normed[col].mean()) < 0.1  # approximately zero mean
+    mean, std = _compute_log_vol_stats(df)
+    assert mean > 0
+    assert std > 0
+
+
+def test_normalize_sequence_shape():
+    rng = np.random.RandomState(42)
+    seq = rng.uniform(10, 50, (60, 6)).astype(np.float32)
+    result = _normalize_sequence(seq, log_vol_mean=12.0, log_vol_std=1.0)
+    assert result.shape == (60, 6)
+    assert result.dtype == np.float32
+    # Close at last position should be 0 (normalized relative to itself)
+    assert abs(result[-1, 3]) < 1e-5
+    assert np.isfinite(result).all()
 
 
 def test_build_sequences_shape():
     df = _make_synthetic_alpha360(n_stocks=2, n_days=100)
-    params = _compute_norm_params(df)
-    normed = _normalize(df, params)
+    mean, std = _compute_log_vol_stats(df)
     X, Y, W = _build_sequences(
-        normed, seq_length=20, stride=10, n_bins=10, price_range=0.10
+        df,
+        seq_length=20,
+        stride=10,
+        n_bins=10,
+        price_range=0.10,
+        log_vol_mean=mean,
+        log_vol_std=std,
     )
     assert X.ndim == 3
     assert X.shape[1] == 20
@@ -81,3 +88,17 @@ def test_build_sequences_shape():
             if W[i, j] > 0:
                 assert 0 <= Y[i, j] < 10
                 assert 0 < W[i, j] <= 1.0
+                # Close at last day of each sequence should be ~0
+                assert abs(X[i, -1, 3]) < 1e-5
+
+
+def test_normalize_price_ratio():
+    """Open 10, last close 50 → normalized open = 10/50 - 1 = -0.8."""
+    rng = np.random.RandomState(42)
+    seq = rng.uniform(10, 50, (60, 6)).astype(np.float32)
+    seq[:, 3] = np.linspace(10, 50, 60)  # ramp up
+    result = _normalize_sequence(seq, log_vol_mean=12.0, log_vol_std=1.0)
+    # First day close = 10, last close = 50 → normalized = 10/50 - 1 = -0.8
+    assert abs(result[0, 3] - (10.0 / 50.0 - 1.0)) < 1e-5
+    # Last day close = 50, last close = 50 → 0
+    assert abs(result[-1, 3]) < 1e-5
