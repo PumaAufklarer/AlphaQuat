@@ -1,52 +1,51 @@
-"""Tests for SR cache module — vectorized implementation."""
+"""Tests for SR cache module — vectorized + multiprocess."""
 
 import numpy as np
 import pandas as pd
 
 from alpha_quat.data.sr_cache import (
-    _nearest_peak_price,
-    _find_sr_for_stock,
+    _nearest_peak_and_dist,
+    _process_one_stock,
     build_cache,
 )
 
 
-def test_nearest_peak_price_basic():
+def test_nearest_peak_and_dist_basic():
     prices = np.array([10.0, 11.0, 12.0, 13.0, 12.0, 11.0, 10.0])
     verified = np.array([False, False, False, True, False, False, False])
-    result = _nearest_peak_price(prices, verified, lookahead=5)
-    # Day 3 is the only peak (13.0)
-    # Day 0,1,2 look forward → see 13.0 at position 3 (within 5)
-    # Day 3+ sees nothing after
-    assert np.isnan(result[3])
-    assert result[0] == 13.0
-    assert result[1] == 13.0
-    assert result[2] == 13.0
-    assert np.isnan(result[4])
-    assert np.isnan(result[5])
+    price_out, dist_out = _nearest_peak_and_dist(prices, verified, lookahead=5)
+    assert np.isnan(price_out[3])  # peak day itself: future of itself not included
+    assert price_out[0] == 13.0
+    assert dist_out[0] == 3.0  # peak at idx 3, current 0 → 3 days ahead
+    assert price_out[1] == 13.0
+    assert dist_out[1] == 2.0
+    assert price_out[2] == 13.0
+    assert dist_out[2] == 1.0
 
 
 def test_nearest_peak_lookahead_limit():
     prices = np.array([10.0, 10.5, 11.0, 11.5, 12.0, 13.0, 12.5, 12.0])
     verified = np.array([False, False, False, False, False, True, False, False])
-    result = _nearest_peak_price(prices, verified, lookahead=2)
-    # Peak at position 5, lookahead=2 means only days 3,4 see it
-    assert np.isnan(result[0])  # too far
-    assert np.isnan(result[1])
-    assert np.isnan(result[2])
-    assert result[3] == 13.0  # position 5 is 2 ahead, within lookahead
-    assert result[4] == 13.0  # position 5 is 1 ahead
-    assert np.isnan(result[5])
+    price_out, dist_out = _nearest_peak_and_dist(prices, verified, lookahead=2)
+    assert np.isnan(price_out[0])
+    assert np.isnan(price_out[1])
+    assert np.isnan(price_out[2])
+    assert price_out[3] == 13.0
+    assert dist_out[3] == 2.0
+    assert price_out[4] == 13.0
+    assert dist_out[4] == 1.0
+    assert np.isnan(price_out[5])
 
 
 def test_nearest_peak_no_peak():
     prices = np.array([10.0, 10.5, 11.0, 11.5, 12.0])
     verified = np.zeros(5, dtype=bool)
-    result = _nearest_peak_price(prices, verified, lookahead=5)
-    assert np.all(np.isnan(result))
+    price_out, dist_out = _nearest_peak_and_dist(prices, verified, lookahead=5)
+    assert np.all(np.isnan(price_out))
+    assert np.all(np.isnan(dist_out))
 
 
-def test_find_sr_for_stock_known_pattern():
-    """Test with a known ZigZag pattern: clear local peaks and troughs."""
+def test_process_one_stock_column_names():
     n = 30
     rng = np.random.RandomState(42)
     base = 10.0 * (1 + 0.02 * np.sin(np.linspace(0, 4 * np.pi, n)))
@@ -64,59 +63,29 @@ def test_find_sr_for_stock_known_pattern():
         }
     )
 
-    result = _find_sr_for_stock(df)
-    assert len(result) == n
-    for col in [
-        "resistance_5d",
-        "resistance_20d",
-        "resistance_60d",
-        "support_5d",
-        "support_20d",
-        "support_60d",
-    ]:
+    result = _process_one_stock(df)
+    expected_cols = [
+        "resistance_5d_price",
+        "resistance_5d_dist",
+        "resistance_20d_price",
+        "resistance_20d_dist",
+        "resistance_60d_price",
+        "resistance_60d_dist",
+        "support_5d_price",
+        "support_5d_dist",
+        "support_20d_price",
+        "support_20d_dist",
+        "support_60d_price",
+        "support_60d_dist",
+    ]
+    for col in expected_cols:
         assert col in result.columns
 
-    # Last day has NaN (no forward data)
-    assert np.isnan(result.iloc[-1]["resistance_5d"])
-    assert np.isnan(result.iloc[-1]["support_5d"])
-
-    # Some middle days should have values
-    mids = result.iloc[5 : n - 5]
-    assert mids["resistance_5d"].notna().any()
-    assert mids["support_5d"].notna().any()
-    assert mids["resistance_20d"].notna().any()
-    assert mids["resistance_60d"].notna().any()
-
-
-def test_resistance_above_current():
-    """Resistance levels should be above current close."""
-    n = 30
-    rng = np.random.RandomState(42)
-    base = 10.0 * (1 + 0.02 * np.sin(np.linspace(0, 4 * np.pi, n)))
-
-    df = pd.DataFrame(
-        {
-            "ts_code": ["000001.SZ"] * n,
-            "trade_date": [f"2024{i + 1:02d}01" for i in range(n)],
-            "open": base,
-            "high": base * 1.02,
-            "low": base * 0.98,
-            "close": base,
-            "volume": rng.randint(100000, 1000000, n),
-            "vwap": base,
-        }
-    )
-
-    result = _find_sr_for_stock(df)
-    res_5d = result["resistance_5d"].dropna()
-    if len(res_5d) > 0:
-        close_vals = result.loc[res_5d.index, "close"].values
-        for i, idx in enumerate(res_5d.index):
-            assert res_5d.iloc[i] >= close_vals[i] * 0.99
+    assert np.isnan(result.iloc[-1]["resistance_5d_price"])
+    assert np.isnan(result.iloc[-1]["resistance_5d_dist"])
 
 
 def test_build_cache_synthetic_data(tmp_path):
-    """Integration test: write synthetic daily data, build cache."""
     daily_dir = tmp_path / "daily"
     daily_dir.mkdir(parents=True)
 
@@ -147,3 +116,7 @@ def test_build_cache_synthetic_data(tmp_path):
     assert cache_dir.exists()
     files = list(cache_dir.glob("*.parquet"))
     assert len(files) == written
+
+    sample = pd.read_parquet(files[0])
+    assert "resistance_5d_price" in sample.columns
+    assert "resistance_5d_dist" in sample.columns

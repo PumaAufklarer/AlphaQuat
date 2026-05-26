@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def masked_cross_entropy(
+def weighted_cross_entropy(
     logits: torch.Tensor,  # (B, 6, n_bins)
     target: torch.Tensor,  # (B, 6) long — class indices
-    mask: torch.Tensor,  # (B, 6) bool
+    weight: torch.Tensor,  # (B, 6) float32 — distance-decayed weights, 0 = invalid
     label_smoothing: float = 0.1,
 ) -> torch.Tensor:
     B, H, C = logits.shape
@@ -29,8 +29,8 @@ def masked_cross_entropy(
         reduction="none",
         label_smoothing=label_smoothing,
     )
-    loss = loss.view(B, H) * mask
-    return loss.sum() / mask.sum().clamp(min=1)
+    loss = loss.view(B, H) * weight
+    return loss.sum() / weight.sum().clamp(min=1)
 
 
 def _validate(model, val_loader):
@@ -38,10 +38,10 @@ def _validate(model, val_loader):
     total_loss = 0.0
     count = 0
     with torch.no_grad():
-        for x, y, m in val_loader:
-            x, y, m = x.to(_DEVICE), y.to(_DEVICE), m.to(_DEVICE)
+        for x, y, w in val_loader:
+            x, y, w = x.to(_DEVICE), y.to(_DEVICE), w.to(_DEVICE)
             logits = model(x)
-            loss = masked_cross_entropy(logits, y, m)
+            loss = weighted_cross_entropy(logits, y, w)
             total_loss += loss.item()
             count += 1
     return total_loss / max(count, 1)
@@ -94,11 +94,11 @@ def train(
         train_loss = 0.0
         train_count = 0
 
-        for x, y, m in train_loader:
-            x, y, m = x.to(_DEVICE), y.to(_DEVICE), m.to(_DEVICE)
+        for x, y, w in train_loader:
+            x, y, w = x.to(_DEVICE), y.to(_DEVICE), w.to(_DEVICE)
             optimizer.zero_grad()
             logits = model(x)
-            loss = masked_cross_entropy(logits, y, m, label_smoothing=0.1)
+            loss = weighted_cross_entropy(logits, y, w, label_smoothing=0.1)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()

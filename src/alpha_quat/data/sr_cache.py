@@ -2,12 +2,18 @@
 
 Output: data/alpha360/YYYYMMDD.parquet — one file per date with columns:
   ts_code, open, high, low, close, volume, vwap,
-  resistance_5d, resistance_20d, resistance_60d,
-  support_5d, support_20d, support_60d
+  resistance_5d_price, resistance_5d_dist,
+  resistance_20d_price, resistance_20d_dist,
+  resistance_60d_price, resistance_60d_dist,
+  support_5d_price, support_5d_dist,
+  support_20d_price, support_20d_dist,
+  support_60d_price, support_60d_dist
 """
 
 import logging
+import os
 from collections import deque
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -19,16 +25,14 @@ logger = logging.getLogger(__name__)
 _OUTPUT_DIR = "alpha360"
 
 _FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
-_SR_COLS = [
-    "resistance_5d",
-    "resistance_20d",
-    "resistance_60d",
-    "support_5d",
-    "support_20d",
-    "support_60d",
+_SR_SUFFIXES = ["5d", "20d", "60d"]
+_SR_PRICE_COLS = [
+    f"{side}_{s}_price" for side in ("resistance", "support") for s in _SR_SUFFIXES
+]
+_SR_DIST_COLS = [
+    f"{side}_{s}_dist" for side in ("resistance", "support") for s in _SR_SUFFIXES
 ]
 
-# Each horizon: (neighborhood, max_lookahead)
 _HORIZONS = [
     ("5d", 2, 5),
     ("20d", 10, 20),
@@ -37,7 +41,6 @@ _HORIZONS = [
 
 
 def _load_all_daily(data_dir: Path) -> pd.DataFrame:
-    """Read all daily parquet files, compute vwap."""
     daily_dir = data_dir / "daily"
     files = sorted(daily_dir.glob("*.parquet"))
     if not files:
@@ -56,117 +59,109 @@ def _load_all_daily(data_dir: Path) -> pd.DataFrame:
     return all_df
 
 
-def _find_sr_for_stock(df: pd.DataFrame) -> pd.DataFrame:
-    """Vectorized SR label computation for one stock's sorted daily data."""
+def _nearest_peak_and_dist(
+    prices: np.ndarray,
+    is_verified: np.ndarray,
+    lookahead: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """For each day d, find nearest verified peak at > d within lookahead.
+
+    Returns (price_array, distance_in_days_array).
+    """
+    T = len(prices)
+    price_out = np.full(T, np.nan)
+    dist_out = np.full(T, np.nan)
+    queue: deque[tuple[int, float]] = deque()
+
+    for d in range(T - 1, -1, -1):
+        while queue and queue[0][0] - d > lookahead:
+            queue.popleft()
+        if queue and queue[0][0] > d:
+            price_out[d] = queue[0][1]
+            dist_out[d] = queue[0][0] - d
+        if is_verified[d]:
+            queue.appendleft((d, prices[d]))
+
+    return price_out, dist_out
+
+
+def _process_one_stock(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute SR labels for one stock. Returns DataFrame with price+dist columns."""
     df = df.sort_values("trade_date").reset_index(drop=True)
     high = df["high"].to_numpy(dtype=float)
     low = df["low"].to_numpy(dtype=float)
 
-    out = df.copy()
-    for col in _SR_COLS:
-        out[col] = np.nan
+    out = df[
+        ["ts_code", "trade_date", "open", "high", "low", "close", "volume", "vwap"]
+    ].copy()
 
     for suffix, neighborhood, lookahead in _HORIZONS:
-        _compute_one_horizon(out, high, low, suffix, neighborhood, lookahead)
+        # --- Resistance ---
+        is_peak = np.zeros(len(high), dtype=bool)
+        for d in range(len(high)):
+            lo = max(0, d - neighborhood)
+            hi = min(len(high), d + neighborhood + 1)
+            if high[d] == high[lo:hi].max():
+                is_peak[d] = True
+
+        verified_res = np.zeros(len(high), dtype=bool)
+        for d in range(len(high) - 2):
+            if is_peak[d]:
+                decline = high[d] - high[d + 1 : min(d + 4, len(high))].min()
+                if decline / high[d] >= 0.005:
+                    verified_res[d] = True
+
+        prices, dists = _nearest_peak_and_dist(high, verified_res, lookahead)
+        out[f"resistance_{suffix}_price"] = prices
+        out[f"resistance_{suffix}_dist"] = dists
+
+        # --- Support ---
+        is_trough = np.zeros(len(high), dtype=bool)
+        for d in range(len(high)):
+            lo = max(0, d - neighborhood)
+            hi = min(len(high), d + neighborhood + 1)
+            if low[d] == low[lo:hi].min():
+                is_trough[d] = True
+
+        verified_sup = np.zeros(len(high), dtype=bool)
+        for d in range(len(high) - 2):
+            if is_trough[d]:
+                bounce = low[d + 1 : min(d + 4, len(high))].max() - low[d]
+                if bounce / low[d] >= 0.005:
+                    verified_sup[d] = True
+
+        prices, dists = _nearest_peak_and_dist(low, verified_sup, lookahead)
+        out[f"support_{suffix}_price"] = prices
+        out[f"support_{suffix}_dist"] = dists
 
     return out
 
 
-def _compute_one_horizon(
-    out: pd.DataFrame,
-    high: np.ndarray,
-    low: np.ndarray,
-    suffix: str,
-    neighborhood: int,
-    lookahead: int,
-):
-    """Compute resistance/support for one horizon using rolling + reverse fill."""
-    T = len(high)
-
-    # --- Resistance: find local peaks with rejection ---
-    is_peak = np.zeros(T, dtype=bool)
-    for d in range(0, T):
-        lo = max(0, d - neighborhood)
-        hi = min(T, d + neighborhood + 1)
-        if high[d] == high[lo:hi].max():
-            is_peak[d] = True
-
-    # Verify rejection: decline within 3 days after peak
-    verified_resistance = np.zeros(T, dtype=bool)
-    for d in range(0, T - 2):
-        if is_peak[d]:
-            decline = high[d] - high[d + 1 : min(d + 4, T)].min()
-            if decline / high[d] >= 0.005:
-                verified_resistance[d] = True
-
-    # Reverse fill: nearest verified peak within lookahead
-    resistance_prices = _nearest_peak_price(high, verified_resistance, lookahead)
-    out[f"resistance_{suffix}"] = resistance_prices
-
-    # --- Support: find local troughs with bounce ---
-    is_trough = np.zeros(T, dtype=bool)
-    for d in range(0, T):
-        lo = max(0, d - neighborhood)
-        hi = min(T, d + neighborhood + 1)
-        if low[d] == low[lo:hi].min():
-            is_trough[d] = True
-
-    # Verify bounce: rise within 3 days after trough
-    verified_support = np.zeros(T, dtype=bool)
-    for d in range(0, T - 2):
-        if is_trough[d]:
-            bounce = low[d + 1 : min(d + 4, T)].max() - low[d]
-            if bounce / low[d] >= 0.005:
-                verified_support[d] = True
-
-    support_prices = _nearest_peak_price(low, verified_support, lookahead)
-    out[f"support_{suffix}"] = support_prices
-
-
-def _nearest_peak_price(
-    prices: np.ndarray,
-    is_verified: np.ndarray,
-    lookahead: int,
-) -> np.ndarray:
-    """For each day d, find nearest verified price at > d within lookahead days.
-
-    Uses reverse scan with deque (O(n) per horizon).
-    """
-    T = len(prices)
-    result = np.full(T, np.nan)
-    queue: deque[tuple[int, float]] = deque()
-
-    for d in range(T - 1, -1, -1):
-        # Clean peaks too far ahead
-        while queue and queue[0][0] - d > lookahead:
-            queue.popleft()
-
-        # Verify the nearest peak is strictly in the future (idx > d)
-        if queue and queue[0][0] > d:
-            result[d] = queue[0][1]
-
-        # Add current day's peak for earlier days to use
-        if is_verified[d]:
-            queue.appendleft((d, prices[d]))
-
-    return result
-
-
 def build_cache(data_dir: Path) -> int:
-    """Build / update alpha360 cache. Returns number of date files written."""
+    """Build alpha360 cache using multiprocessing. Returns number of date files written."""
     all_df = _load_all_daily(data_dir)
     ts_codes = all_df["ts_code"].unique()
     logger.info("Loaded %d daily rows across %d stocks", len(all_df), len(ts_codes))
 
-    results = []
-    for ts_code in tqdm(ts_codes, desc="Processing stocks"):
-        stock_df = all_df[all_df["ts_code"] == ts_code].copy()
-        processed = _find_sr_for_stock(stock_df)
-        results.append(processed)
+    # Stock-level parallel processing
+    stock_dfs = [all_df[all_df["ts_code"] == code].copy() for code in ts_codes]
+    results: list[pd.DataFrame] = []
+    n_workers = max(1, os.cpu_count() or 4)
+
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {
+            executor.submit(_process_one_stock, sd): i for i, sd in enumerate(stock_dfs)
+        }
+        for future in tqdm(
+            as_completed(futures), total=len(futures), desc="Processing stocks"
+        ):
+            results.append(future.result())
 
     out_df = pd.concat(results, ignore_index=True)
 
-    all_cols = ["ts_code", "trade_date"] + _FEATURE_COLS + _SR_COLS
+    all_cols = (
+        ["ts_code", "trade_date"] + _FEATURE_COLS + _SR_PRICE_COLS + _SR_DIST_COLS
+    )
     out_df = out_df[[c for c in all_cols if c in out_df.columns]]
 
     output_dir = data_dir / _OUTPUT_DIR

@@ -9,18 +9,19 @@ from torch.utils.data import Dataset
 logger = logging.getLogger(__name__)
 
 _FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
-_SR_COLS = [
-    "resistance_5d",
-    "resistance_20d",
-    "resistance_60d",
-    "support_5d",
-    "support_20d",
-    "support_60d",
+_SR_PRICE_COLS = [
+    f"{side}_{s}_price"
+    for side in ("resistance", "support")
+    for s in ("5d", "20d", "60d")
+]
+_SR_DIST_COLS = [
+    f"{side}_{s}_dist"
+    for side in ("resistance", "support")
+    for s in ("5d", "20d", "60d")
 ]
 
 
 def _load_alpha360_range(data_dir: Path, start: str, end: str) -> pd.DataFrame:
-    """Load alpha360 cache files for date range [start, end]."""
     cache_dir = data_dir / "alpha360"
     all_dates = sorted(
         d.stem for d in cache_dir.glob("*.parquet") if start <= d.stem <= end
@@ -37,7 +38,6 @@ def _load_alpha360_range(data_dir: Path, start: str, end: str) -> pd.DataFrame:
 
 
 def _compute_norm_params(df: pd.DataFrame) -> dict[str, tuple[float, float]]:
-    """Compute per-feature mean/std from training data."""
     params = {}
     for col in _FEATURE_COLS:
         vals = df[col].dropna().values
@@ -45,7 +45,7 @@ def _compute_norm_params(df: pd.DataFrame) -> dict[str, tuple[float, float]]:
             params[col] = (0.0, 1.0)
         else:
             params[col] = (float(vals.mean()), float(vals.std() + 1e-8))
-    for col in _SR_COLS:
+    for col in _SR_PRICE_COLS:
         vals = df[col].dropna().values
         if len(vals) == 0:
             params[col] = (0.0, 1.0)
@@ -67,77 +67,76 @@ def _normalize(
 def _build_sequences(
     df: pd.DataFrame, seq_length: int, stride: int, n_bins: int, price_range: float
 ):
-    """Build (X, y, mask) sequences from per-stock data.
+    """Build (X, y, weight) sequences from per-stock data.
 
     X: (seq_length, 6) normalized features
-    y: (6,) int64 — class index (correct bin) per horizon, 0 for invalid
-    mask: (6,) bool — True where SR label was valid
+    y: (6,) int64 — correct bin index per horizon, 0 for invalid
+    weight: (6,) float32 — distance-decayed weight, 0 for invalid
     """
     features = []
     labels = []
-    masks = []
+    weights = []
 
     for ts_code, stock_df in df.groupby("ts_code"):
         stock_df = stock_df.sort_values("trade_date").reset_index(drop=True)
         vals = stock_df[_FEATURE_COLS].to_numpy(dtype=np.float32)
-        sr_vals = stock_df[_SR_COLS].to_numpy(dtype=np.float32)
+        sr_prices = stock_df[_SR_PRICE_COLS].to_numpy(dtype=np.float32)
+        sr_dists = stock_df[_SR_DIST_COLS].to_numpy(dtype=np.float32)
 
         for i in range(0, len(stock_df) - seq_length, stride):
             x = vals[i : i + seq_length]
-            sr = sr_vals[i + seq_length - 1]
+            prices = sr_prices[i + seq_length - 1]
+            dists = sr_dists[i + seq_length - 1]
 
             if np.isnan(x).any():
                 continue
-
-            if np.isnan(sr).all():
+            if np.isnan(prices).all():
                 continue
 
-            mask = ~np.isnan(sr)
-
+            valid = ~np.isnan(prices)
             y = np.zeros(6, dtype=np.int64)
+            w = np.zeros(6, dtype=np.float32)
+
             for j in range(6):
-                if mask[j]:
+                if valid[j]:
                     close_last = vals[i + seq_length - 1, 3]
-                    ratio = (sr[j] - close_last) / close_last
+                    ratio = (prices[j] - close_last) / close_last
                     bin_idx = int((ratio / price_range + 1) * n_bins / 2)
                     bin_idx = max(0, min(n_bins - 1, bin_idx))
                     y[j] = bin_idx
+                    # Weight: nearer peaks matter more, half-life ~5 trading days
+                    w[j] = 1.0 / (1.0 + dists[j] / 5.0)
 
             features.append(x)
             labels.append(y)
-            masks.append(mask)
+            weights.append(w)
 
     if not features:
         raise ValueError("No valid sequences built")
 
     X = np.stack(features)
     Y = np.stack(labels)
-    M = np.stack(masks)
-    return X, Y, M
+    W = np.stack(weights)
+    return X, Y, W
 
 
 class SRSequenceDataset(Dataset):
-    def __init__(self, X: np.ndarray, Y: np.ndarray, mask: np.ndarray):
+    def __init__(self, X: np.ndarray, Y: np.ndarray, weight: np.ndarray):
         self.X = torch.from_numpy(X).float()
         self.Y = torch.from_numpy(Y).long()
-        self.mask = torch.from_numpy(mask).bool()
+        self.weight = torch.from_numpy(weight).float()
 
     def __len__(self):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.Y[idx], self.mask[idx]
+        return self.X[idx], self.Y[idx], self.weight[idx]
 
 
 def build_datasets(
     data_dir: Path,
     config,
 ) -> tuple[SRSequenceDataset, SRSequenceDataset, dict]:
-    """Load, normalize, and split into train/val datasets.
-
-    Returns:
-        train_dataset, val_dataset, norm_params
-    """
     logger.info(
         "Loading alpha360 cache for train range %s-%s",
         config.train_start,
@@ -160,23 +159,19 @@ def build_datasets(
         config.seq_length,
         config.stride,
     )
-    X_tr, Y_tr, M_tr = _build_sequences(
+    X_tr, Y_tr, W_tr = _build_sequences(
         train_norm, config.seq_length, config.stride, config.n_bins, config.price_range
     )
     logger.info("Train: %d sequences", len(X_tr))
 
-    logger.info(
-        "Building val sequences (seq=%d, stride=%d)...",
-        config.seq_length,
-        config.stride,
-    )
-    X_val, Y_val, M_val = _build_sequences(
+    logger.info("Building val sequences...")
+    X_val, Y_val, W_val = _build_sequences(
         val_norm, config.seq_length, config.stride, config.n_bins, config.price_range
     )
     logger.info("Val: %d sequences", len(X_val))
 
     return (
-        SRSequenceDataset(X_tr, Y_tr, M_tr),
-        SRSequenceDataset(X_val, Y_val, M_val),
+        SRSequenceDataset(X_tr, Y_tr, W_tr),
+        SRSequenceDataset(X_val, Y_val, W_val),
         norm_params,
     )

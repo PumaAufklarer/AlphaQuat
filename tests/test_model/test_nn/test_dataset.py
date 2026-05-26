@@ -27,12 +27,18 @@ def _make_synthetic_alpha360(n_stocks=2, n_days=100):
                     "close": price,
                     "volume": rng.randint(100000, 1000000),
                     "vwap": price * (1 + rng.randn() * 0.003),
-                    "resistance_5d": price * 1.05 if d < n_days - 5 else np.nan,
-                    "resistance_20d": price * 1.10 if d < n_days - 20 else np.nan,
-                    "resistance_60d": price * 1.20 if d < n_days - 60 else np.nan,
-                    "support_5d": price * 0.95 if d < n_days - 5 else np.nan,
-                    "support_20d": price * 0.90 if d < n_days - 20 else np.nan,
-                    "support_60d": price * 0.80 if d < n_days - 60 else np.nan,
+                    "resistance_5d_price": price * 1.05 if d < n_days - 5 else np.nan,
+                    "resistance_20d_price": price * 1.10 if d < n_days - 20 else np.nan,
+                    "resistance_60d_price": price * 1.20 if d < n_days - 60 else np.nan,
+                    "support_5d_price": price * 0.95 if d < n_days - 5 else np.nan,
+                    "support_20d_price": price * 0.90 if d < n_days - 20 else np.nan,
+                    "support_60d_price": price * 0.80 if d < n_days - 60 else np.nan,
+                    "resistance_5d_dist": 3.0 if d < n_days - 5 else np.nan,
+                    "resistance_20d_dist": 10.0 if d < n_days - 20 else np.nan,
+                    "resistance_60d_dist": 30.0 if d < n_days - 60 else np.nan,
+                    "support_5d_dist": 3.0 if d < n_days - 5 else np.nan,
+                    "support_20d_dist": 10.0 if d < n_days - 20 else np.nan,
+                    "support_60d_dist": 30.0 if d < n_days - 60 else np.nan,
                 }
             )
     return pd.DataFrame(rows)
@@ -58,7 +64,7 @@ def test_build_sequences_shape():
     df = _make_synthetic_alpha360(n_stocks=2, n_days=100)
     params = _compute_norm_params(df)
     normed = _normalize(df, params)
-    X, Y, M = _build_sequences(
+    X, Y, W = _build_sequences(
         normed, seq_length=20, stride=10, n_bins=10, price_range=0.10
     )
     assert X.ndim == 3
@@ -67,10 +73,11 @@ def test_build_sequences_shape():
     assert Y.ndim == 2
     assert Y.shape[1] == 6
     assert Y.dtype == np.int64
-    assert M.shape == (Y.shape[0], 6)
-    assert M.dtype == bool
+    assert W.shape == (Y.shape[0], 6)
+    assert W.dtype == np.float32
     assert np.isfinite(X).all()
     for i in range(Y.shape[0]):
         for j in range(6):
-            if M[i, j]:
+            if W[i, j] > 0:
                 assert 0 <= Y[i, j] < 10
+                assert 0 < W[i, j] <= 1.0
