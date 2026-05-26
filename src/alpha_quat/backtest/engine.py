@@ -34,7 +34,12 @@ class BacktestEngine:
             exp_cfg = ExpCfg.load(exp_dir / "experiment.yaml")
             if exp_cfg.mode not in SigVARIANTS:
                 raise ValueError(f"Unknown signal mode: {exp_cfg.mode}")
-            self.signal_gen = SigVARIANTS[exp_cfg.mode](exp_dir)
+            signal_cls = SigVARIANTS[exp_cfg.mode]
+            self._sr_mode = signal_cls.mode == "transformer_sr"
+            if self._sr_mode:
+                self.signal_gen = signal_cls(exp_dir, data_dir=data_dir)
+            else:
+                self.signal_gen = signal_cls(exp_dir)
         elif config.model_dir:
             self.signal_gen = MLSignalGenerator(
                 Path(config.model_dir), top_k=config.top_k
@@ -44,6 +49,7 @@ class BacktestEngine:
                 short_factor=config.short_factor, long_factor=config.long_factor
             )
 
+        self._sr_mode = False
         self.position_mgr = EqualWeightTopKPosition(top_k=config.top_k)
         self._pending_signals = None
         self._total_invested = config.initial_capital
@@ -134,35 +140,29 @@ class BacktestEngine:
                     prices=prices_df,
                 )
 
-                buy_sigs = sig_df.loc[sig_df["action"] == "buy"]
-                if not buy_sigs.empty:
-                    fake_result = SignalResult(
-                        signals=buy_sigs.reset_index(drop=True),
-                        metadata=self._pending_signals.metadata,
-                    )
-                    alloc = self.position_mgr.allocate(fake_result, ctx)
-                    alloc = self.position_mgr.constrain(alloc, ctx)
-                    for _, row in alloc.iterrows():
+                if self._sr_mode:
+                    # SR mode: direct entry/exit, no top-K
+                    for _, row in sig_df.iterrows():
                         code = row["ts_code"]
                         px = open_px.get(code)
-                        if px and px > 0:
-                            target_amt = row["target_weight"] * ctx.capital
+                        if px is None or px <= 0:
+                            continue
+                        if (
+                            row["action"] == "buy"
+                            and code not in self.portfolio.holdings
+                        ):
                             self.portfolio.buy(
                                 ts_code=code,
                                 price=px,
-                                target_amount=target_amt,
+                                target_amount=ctx.capital * 0.95,
                                 trade_date=td,
                                 commission_rate=self.config.commission_rate,
                                 min_commission=self.config.min_commission,
                             )
-
-                sell_sigs = sig_df.loc[sig_df["action"] == "sell"]
-                for _, row in sell_sigs.iterrows():
-                    code = row["ts_code"]
-                    if code in self.portfolio.holdings:
-                        h = self.portfolio.holdings[code]
-                        px = open_px.get(code)
-                        if px and px > 0:
+                        elif (
+                            row["action"] == "sell" and code in self.portfolio.holdings
+                        ):
+                            h = self.portfolio.holdings[code]
                             self.portfolio.sell(
                                 ts_code=code,
                                 price=px,
@@ -171,19 +171,60 @@ class BacktestEngine:
                                 commission_rate=self.config.commission_rate,
                                 min_commission=self.config.min_commission,
                             )
+                else:
+                    buy_sigs = sig_df.loc[sig_df["action"] == "buy"]
+                    if not buy_sigs.empty:
+                        fake_result = SignalResult(
+                            signals=buy_sigs.reset_index(drop=True),
+                            metadata=self._pending_signals.metadata,
+                        )
+                        alloc = self.position_mgr.allocate(fake_result, ctx)
+                        alloc = self.position_mgr.constrain(alloc, ctx)
+                        for _, row in alloc.iterrows():
+                            code = row["ts_code"]
+                            px = open_px.get(code)
+                            if px and px > 0:
+                                target_amt = row["target_weight"] * ctx.capital
+                                self.portfolio.buy(
+                                    ts_code=code,
+                                    price=px,
+                                    target_amount=target_amt,
+                                    trade_date=td,
+                                    commission_rate=self.config.commission_rate,
+                                    min_commission=self.config.min_commission,
+                                )
 
-            feat_path = self.data_dir / "features" / f"{td}.parquet"
-            if not feat_path.exists():
-                self._pending_signals = None
-                self.portfolio.record_snapshot(td, close_px)
-                continue
+                    sell_sigs = sig_df.loc[sig_df["action"] == "sell"]
+                    for _, row in sell_sigs.iterrows():
+                        code = row["ts_code"]
+                        if code in self.portfolio.holdings:
+                            h = self.portfolio.holdings[code]
+                            px = open_px.get(code)
+                            if px and px > 0:
+                                self.portfolio.sell(
+                                    ts_code=code,
+                                    price=px,
+                                    shares=h.shares,
+                                    trade_date=td,
+                                    commission_rate=self.config.commission_rate,
+                                    min_commission=self.config.min_commission,
+                                )
 
-            features = pd.read_parquet(feat_path)
-            features = features.loc[features["ts_code"].isin(list(universe))]
+            if self._sr_mode:
+                features = pd.DataFrame()
+            else:
+                feat_path = self.data_dir / "features" / f"{td}.parquet"
+                if not feat_path.exists():
+                    self._pending_signals = None
+                    self.portfolio.record_snapshot(td, close_px)
+                    continue
+                features = pd.read_parquet(feat_path)
+                features = features.loc[features["ts_code"].isin(list(universe))]
 
-            if self.config.model_dir or self.config.experiment_name:
+            if self._sr_mode:
+                pass  # signals already set above
+            elif self.config.model_dir or self.config.experiment_name:
                 if self.config.daily_monitor:
-                    # Daily monitoring: score → check holdings → sell weak → buy best
                     ctx_sig = StrategyContext(
                         trade_date=td, capital=self.portfolio.total_value(close_px)
                     )
@@ -194,8 +235,6 @@ class BacktestEngine:
                             signal_result.signals["score"],
                         )
                     )
-
-                    # Extract CI / confidence from metadata
                     meta = signal_result.metadata
                     has_ci = "ci_width" in meta and "confidence" in meta
                     if has_ci:
@@ -210,11 +249,9 @@ class BacktestEngine:
                     buy_codes = []
                     for code, h in list(self.portfolio.holdings.items()):
                         px = close_px.get(code)
-                        # Dynamic stop-loss
                         if px and px < h.peak_price * (1 - self.config.stop_loss_pct):
                             sell_codes.append(code)
                             continue
-                        # CI-based: confident sell when upper bound < threshold
                         if (
                             has_ci
                             and self.config.confidence_threshold is not None
@@ -224,21 +261,19 @@ class BacktestEngine:
                             if hi_map.get(code, 0) < self.config.sell_upper_threshold:
                                 sell_codes.append(code)
                                 continue
-                        # Score percentile (fallback if no CI)
                         if not has_ci and self.config.sell_score_percentile is not None:
                             all_scores = signal_result.signals["score"]
                             score_cut = all_scores.quantile(
                                 self.config.sell_score_percentile
                             )
-                            if isinstance(score_cut, pd.Series):
-                                score_cut = float(score_cut.iloc[0])
-                            else:
-                                score_cut = float(score_cut)
-                            sc = scores_map.get(code, 0)
-                            if sc < score_cut:
+                            score_cut = (
+                                float(score_cut.iloc[0])
+                                if isinstance(score_cut, pd.Series)
+                                else float(score_cut)
+                            )
+                            if scores_map.get(code, 0) < score_cut:
                                 sell_codes.append(code)
 
-                    # Buy: sort by score × confidence when CI available, else by score
                     current_set = set(self.portfolio.holdings.keys()) - set(sell_codes)
                     buy_pool = signal_result.signals[
                         ~signal_result.signals["ts_code"].isin(
@@ -258,7 +293,6 @@ class BacktestEngine:
                         .tolist()
                     )
 
-                    # Ensure we have at least initial top_k positions
                     if (
                         self._last_rebalance_idx is None
                         and len(current_set) < self.config.top_k
@@ -297,16 +331,12 @@ class BacktestEngine:
                         trade_date=td, capital=self.portfolio.total_value(close_px)
                     )
                     signal_result = self.signal_gen.generate(features, ctx_sig)
-
-                    # Raw scores map (used everywhere)
                     scores_map = dict(
                         zip(
                             signal_result.signals["ts_code"],
                             signal_result.signals["score"],
                         )
                     )
-
-                    # Compute adjusted scores for position sizing
                     strat = self.config.weighting_strategy
                     all_scores = signal_result.signals["score"].values.copy()
                     adjusted = all_scores.copy()
@@ -323,18 +353,15 @@ class BacktestEngine:
                             if len(hist) >= 3:
                                 mean_s = float(np.mean(hist))
                                 var_s = max(float(np.var(hist, ddof=1)) + 1e-8, 1e-8)
-                                f = mean_s / var_s
-                                adjusted[i] = raw * min(f, 3.0)
+                                adjusted[i] = raw * min(mean_s / var_s, 3.0)
                             else:
                                 adjusted[i] = raw
                     elif strat == "score_momentum":
                         for i, code in enumerate(signal_result.signals["ts_code"]):
                             raw = all_scores[i]
                             hist = self._score_history.get(code, [])
-                            bonus = min(len(hist) / 5, 1.0)
-                            adjusted[i] = raw * (1 + bonus)
+                            adjusted[i] = raw * (1 + min(len(hist) / 5, 1.0))
 
-                    # Top-K by adjusted score
                     signal_result.signals["adj_score"] = adjusted
                     top_codes = signal_result.signals.nlargest(
                         self.config.top_k, "adj_score"
@@ -342,14 +369,12 @@ class BacktestEngine:
                     current_codes = list(self.portfolio.holdings.keys())
                     buy_codes = [c for c in top_codes if c not in current_codes]
 
-                    # Update score history for top_codes (used by kelly/score_momentum)
                     if strat in ("kelly", "score_momentum"):
                         for code in top_codes:
                             self._score_history.setdefault(code, []).append(
                                 scores_map.get(code, 0)
                             )
 
-                    # Graded sell: only sell stocks outside Top-K if score < threshold
                     sell_codes = []
                     for code in current_codes:
                         if code not in top_codes:
@@ -361,7 +386,6 @@ class BacktestEngine:
                                 sell_codes.append(code)
 
                     if sell_codes or buy_codes:
-                        # Use adjusted scores for proportional allocation
                         adj_map = dict(zip(signal_result.signals["ts_code"], adjusted))
                         buy_scores = [adj_map.get(c, 1) for c in buy_codes]
                         sig_df = pd.DataFrame(
