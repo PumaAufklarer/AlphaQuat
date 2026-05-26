@@ -147,8 +147,6 @@ def _cmd_predict(args, config):
     logger = logging.getLogger(__name__)
 
     # Fetch latest data
-    from alpha_quat.data.fetcher import Fetcher
-    from alpha_quat.data.pipeline import Pipeline
     from alpha_quat.data.writer import ParquetWriter
     from alpha_quat.data.sources.daily import DailySource
     from alpha_quat.data.sources.daily_basic import DailyBasicSource
@@ -353,14 +351,7 @@ def _cmd_model(args, config):
 
 
 def _cmd_fetch(args, config, metadata):
-    from alpha_quat.data.fetcher import Fetcher
-    from alpha_quat.data.pipeline import Pipeline
     from alpha_quat.data.writer import ParquetWriter
-    from alpha_quat.data.sources.stock_basic import StockBasicSource
-    from alpha_quat.data.sources.trade_cal import TradeCalSource
-    from alpha_quat.data.sources.stock_st import StockStSource
-    from alpha_quat.data.sources.daily import DailySource
-    from alpha_quat.data.sources.daily_basic import DailyBasicSource
 
     fetcher = Fetcher(token=config.token)
     writer = ParquetWriter()

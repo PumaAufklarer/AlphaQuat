@@ -14,7 +14,8 @@ class BacktestConfig:
     long_factor: str = "KLEN36"
     top_k: int = 5
     benchmark: str | None = None
-    model_dir: str | None = None
+    experiment_name: str | None = None  # replaces model_dir for named experiments
+    model_dir: str | None = None  # kept for backward compatibility
     rebalance_interval: int = 5  # trading days between rebalances
     sell_threshold: float | None = (
         0.40  # None=sell all out-of-top-K; 0.40=only if score<0.40

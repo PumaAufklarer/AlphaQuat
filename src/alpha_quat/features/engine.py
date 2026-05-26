@@ -97,7 +97,7 @@ class FeatureEngine:
             prev = "_rp"
 
         if ts_exprs:
-            sql += f", _ts AS (\n  SELECT *,\n    "
+            sql += ", _ts AS (\n  SELECT *,\n    "
             sql += ",\n    ".join(ts_exprs)
             sql += f"\n  FROM {prev}\n  WINDOW w_time AS (PARTITION BY ts_code ORDER BY trade_date)\n)"
             prev = "_ts"

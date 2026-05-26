@@ -161,7 +161,7 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
         print()
         print("=== 当前持仓 ===")
         ch = f"{'代码':>10} {'名称':>8}   {'评分':>6} {'排名':>6}"
-        ci_header = f" {'CI':>6}" if has_ci else f""
+        ci_header = f" {'CI':>6}" if has_ci else ""
         ch += ci_header + f"   {'持仓':>6} {'成本':>8}"
         print(ch)
         print("-" * (68 if has_ci else 60))

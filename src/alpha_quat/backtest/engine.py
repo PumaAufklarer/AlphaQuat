@@ -26,7 +26,16 @@ class BacktestEngine:
         self.data_dir = data_dir
         self.portfolio = Portfolio(cash=config.initial_capital)
 
-        if config.model_dir:
+        if config.experiment_name:
+            from alpha_quat.experiment.config import ExperimentConfig as ExpCfg
+            from alpha_quat.strategy.signals.variants import VARIANTS as SigVARIANTS
+
+            exp_dir = data_dir / "models" / "experiments" / config.experiment_name
+            exp_cfg = ExpCfg.load(exp_dir / "experiment.yaml")
+            if exp_cfg.mode not in SigVARIANTS:
+                raise ValueError(f"Unknown signal mode: {exp_cfg.mode}")
+            self.signal_gen = SigVARIANTS[exp_cfg.mode](exp_dir)
+        elif config.model_dir:
             self.signal_gen = MLSignalGenerator(
                 Path(config.model_dir), top_k=config.top_k
             )
@@ -172,7 +181,7 @@ class BacktestEngine:
             features = pd.read_parquet(feat_path)
             features = features.loc[features["ts_code"].isin(list(universe))]
 
-            if self.config.model_dir:
+            if self.config.model_dir or self.config.experiment_name:
                 if self.config.daily_monitor:
                     # Daily monitoring: score → check holdings → sell weak → buy best
                     ctx_sig = StrategyContext(

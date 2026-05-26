@@ -1,4 +1,3 @@
-
 from alpha_quat.experiment.config import ExperimentConfig
 from alpha_quat.experiment.registry import ExperimentRegistry
 
