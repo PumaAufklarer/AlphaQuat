@@ -6,274 +6,160 @@ Always use `uv` — pip/poetry won't work here.
 
 ```
 uv run pytest --cov=src          # test
-uv run ruff format $FILE         # format
-uv run ruff check --fix $FILE    # lint
-uv run pyright                   # typecheck
+uv run ruff format .              # format
+uv run ruff check --fix .         # lint
+uv run pyright                    # typecheck (46 pre-existing errors, don't fix)
 ```
 
 ## Verification order
 
 ```
-uv run ruff format . && uv run ruff check --fix . && uv run pyright && uv run pytest --cov=src
+uv run ruff format . && uv run ruff check --fix . && uv run pytest --cov=src
 ```
 
-## Project layout
+## Architecture: ML models (`src/alpha_quat/model/`)
 
-- Package: `alpha-quat` (PyPI) → import `alpha_quat`
-- Source: `src/alpha_quat/`, tests: `tests/`
-- Design specs: `docs/superpowers/specs/`, implementation plans: `docs/superpowers/plans/`
-- `config.yaml` (gitignored) required at runtime:
-  ```yaml
-  tushare:
-    token: "xxx"
-  data:
-    dir: "./data"
-  ```
+### LightGBM variants (`model/lightgbm/variants/`)
 
-## Architecture: data fetching (`src/alpha_quat/data/`)
+Each variant is a separate file inheriting from `LightGBMBasePipeline(ABC)`, registered via `@register`:
+
+| File | mode | Trains |
+|------|------|--------|
+| `regression.py` | `"regression"` | 3 models (5d/20d/60d), MSE loss |
+| `quantile.py` | `"quantile"` | 9 models (3 horizons × 3 alphas), pinball loss |
+| `lambdarank.py` | `"lambdarank"` | 3 models with ranking objective |
+
+`pipeline.py` is a factory — `run_variant(data_dir, ExperimentConfig)` dispatches to the right variant. Never instantiate `LightGBMPipeline` directly.
+
+**Model output:** `data/models/experiments/<name>/` with `experiment.yaml` config snapshot + model files.
+
+### Neural network (`model/nn/`)
+
+Current variant: `sr_transformer` — predicts support/resistance probability distributions.
 
 | Module | Purpose |
 |--------|---------|
-| `source.py` | `DataSource` ABC — declare api_name, partition_by ("none"\|"date"), fields, optional start_date |
-| `fetcher.py` | Wraps tushare with retry (12×5s by default) |
-| `writer.py` | `ParquetWriter` — `overwrite()` for full sources, `write()` for date-partitioned, `merge()` for multi-factor column joining |
-| `metadata.py` | `MetadataManager` — duckdb `data/registry.db` tracks what's been pulled per API+date. Also `delete_since()` for rebuild |
-| `pipeline.py` | `Pipeline` — dispatches full/incremental sources, reads trade_cal for date lists |
-| `sources/` | Concrete DataSource subclasses (stock_basic, trade_cal, daily, daily_basic, stock_st) |
+| `transformer/labels.py` | SR label generation (local peak/trough detection) |
+| `transformer/models/transformer.py` | `StockTransformer` — 4-layer TransformerEncoder |
+| `transformer/models/dataset.py` | `SRSequenceDataset` — per-sequence normalization (price ratios + log volume) |
+| `transformer/train.py` | AdamW + warmup-cosine + grad clipping + label smoothing |
+| `transformer/evaluate.py` | Per-horizon loss, top-3 bin accuracy |
+| `transformer/inference.py` | `SRInference` — `predict_batch()` for GPU-batched inference |
 
-```
-config.yaml → Config → Pipeline(DataSource, Fetcher, ParquetWriter, MetadataManager)
-```
+**Per-sequence normalization** — each (60, 6) sequence normalized independently:
+- Price features (O/H/L/C/VWAP): `value / close[-1] - 1` → ratio relative to last close
+- Volume: `log(1+vol) → z-score` (global stats from training set)
 
-## Architecture: feature engineering (`src/alpha_quat/features/`)
+**Labels:** class indices (int64, not one-hot). `CrossEntropyLoss` with `label_smoothing=0.1`. Invalid horizons masked via float weight `w = 1/(1 + dist/5)` where dist = days to nearest peak.
+
+### Architecture: experiment system (`src/alpha_quat/experiment/`)
 
 | Module | Purpose |
 |--------|---------|
-| `factor.py` | `Factor` dataclass (name, expression, category, depends_on). `compile()` translates DSL to DuckDB SQL via regex |
-| `registry.py` | `FactorRegistry` — topo sort (Kahn's BFS), cycle detection, `min_lookback()` |
-| `engine.py` | `FeatureEngine` — builds 2-CTE DuckDB query (ts + rank), computes per batch of dates |
-| `pipeline.py` | `FeaturePipeline` — date scheduling with incremental/rebuild/--since, batch of 20 dates |
-| `alphasets/` | Pre-built factor sets. `alpha158.py` → `build_alpha158()` returns a `FactorRegistry` |
+| `config.py` | `ExperimentConfig` — name, mode, date ranges, hyperparams. Save/load via yaml |
+| `registry.py` | `ExperimentRegistry` — `data/models/registry.json` tracks all experiments |
 
-**Computation model:**
+Every model run requires `--name <experiment_name>`. Models saved to `data/models/experiments/<name>/`.
 
-```
-raw (base CTE: read daily/*.parquet with vwap column)
-  │
-  ▼
-_ts CTE (all time-series + RANK/QUANTILE inner exprs, WINDOW w_time)
-  │
-  ▼
-_rank CTE (all RANK()/NTILE() OVER expressions, no WINDOW)
-  │
-  ▼
-SELECT ts_code, trade_date, <all factors> WHERE trade_date BETWEEN min AND max
-```
+## Architecture: SR cache (`src/alpha_quat/data/sr_cache.py`)
 
-Only **2 CTEs** regardless of factor count — never create one CTE per factor.
+Pre-computes Alpha360 features (6 raw OHLCV fields) + SR labels (nearest support/resistance levels with distance in days). Output: `data/alpha360/YYYYMMDD.parquet`.
+
+Algorithm per stock:
+1. Vectorized local peak/trough detection via pandas rolling (C-level)
+2. Verify rejection/bounce within 3 days (0.5% threshold)
+3. Reverse-fill nearest verified peak via deque (O(n) per horizon)
+4. Per-horizon neighborhoods: 5d=±2, 20d=±10, 60d=±30
+
+## Architecture: backtesting
+
+### LightGBM ranking backtest (`backtest/engine.py`)
+
+`BacktestEngine` — day-by-day, T+1 open execution, top-K rebalance. Supports experiment-based signal selection via `strategy/signals/variants/`.
+
+### SR Transformer backtest (`backtest/engine_sr.py`)
+
+`run_sr_backtest()` — separate entry for SR-based strategies. Price-triggered execution (checks daily low/high vs target price). Position sizing: score-weighted allocation, max 25% per stock, max 8 holdings, 10% min cash.
+
+Performance optimization: pre-loads all alpha360 data once, builds daily batches from in-memory numpy arrays.
+
+## Signal variants (`strategy/signals/variants/`)
+
+Each variant registered via `@register`. `BaseMLSignal(ABC)` with `_load_models()` + `generate()`.
+
+| Variant | mode | Loads |
+|---------|------|-------|
+| `regression_signal.py` | `"regression"` | 3 models (5d/20d/60d) |
+| `quantile_signal.py` | `"quantile"` | 9 models (3 horizons × 3 alphas) |
+| `lambdarank_signal.py` | `"lambdarank"` | 3 lambdarank models |
+| `transformer_sr_signal.py` | `"transformer_sr"` | `SRInference` — batch GPU inference |
 
 ## CLI
 
 ```
-uv run alpha-quat                                     # same as "fetch" (backward compat)
-uv run alpha-quat fetch -s daily,trade_cal            # pull raw data
-uv run alpha-quat feature                             # compute alpha158 (incremental)
-uv run alpha-quat feature --rebuild                   # recompute from scratch
-uv run alpha-quat feature --rebuild --since 20180101  # rebuild starting from date
-uv run alpha-quat feature --since 20260101            # recompute from date onward
-uv run alpha-quat backtest                            # run backtest with defaults
-uv run alpha-quat model lightgbm --no-tune            # train LightGBM (5d/20d/60d)
-uv run alpha-quat model lightgbm --no-tune --quantile # 9 quantile models (best: Sharpe 1.88)
-uv run alpha-quat model lightgbm --trials 50          # train with Optuna tuning
-uv run alpha-quat model lightgbm --lambdarank         # ranking-based training (experimental)
-uv run alpha-quat backtest --rebalance-interval 10 --sell-threshold 0.40  # best config
-uv run alpha-quat backtest --weighting kelly          # position sizing strategies
-uv run alpha-quat predict --top-k 10 --holdings data/holdings.yaml  # pull data, score, show picks
-uv run alpha-quat --summary                           # show registry status
+uv run alpha-quat                                    # same as "fetch"
+uv run alpha-quat fetch -s daily,trade_cal
+uv run alpha-quat feature
+
+# LightGBM — variant is positional
+uv run alpha-quat model lightgbm quantile --name exp_quantile_v1
+uv run alpha-quat model lightgbm regression --name exp_reg_v1
+uv run alpha-quat model lightgbm lambdarank --name exp_lr_v1
+
+# Transformer SR
+uv run alpha-quat sr-cache                                            # precompute alpha360 + SR labels
+uv run alpha-quat model nn sr_transformer --name exp_sr_v1            # train
+uv run alpha-quat model nn sr_transformer --name tune --tune          # grid search
+
+# Backtest
+uv run alpha-quat backtest --experiment exp_quantile_v1               # LightGBM ranking bt
+uv run alpha-quat backtest-sr --experiment exp_sr_v1 --start 20240101 # SR entry/exit bt
+
+# Manage
+uv run alpha-quat experiment list
+uv run alpha-quat experiment show exp_name
+uv run alpha-quat --summary
 ```
 
 ## Data output
 
 ```
 data/
-├── registry.db                  # shared metadata: api_name="daily"/"alpha158"/...
-├── stock_basic.parquet          # overwritten each run
-├── trade_cal.parquet            # overwritten each run
-├── daily/YYYY_MM_DD.parquet     # raw input for features
+├── registry.db                    # metadata: api_name + last date
+├── daily/YYYY_MM_DD.parquet      # raw tushare data
 ├── daily_basic/YYYY_MM_DD.parquet
+├── stock_basic.parquet
+├── trade_cal.parquet
 ├── stock_st/YYYY_MM_DD.parquet
-├── features/YYYYMMDD.parquet    # wide table: ts_code, trade_date, +factor cols (no dashes — unlike daily/)
-├── models/                      # trained model files + results.json
-└── backtest_report.html         # generated by backtest command
-
-## OOS Best Result (quantile median ensemble)
-
-```
-Period:      2022-04 ~ 2026-03 (4 years out-of-sample)
-Capital:     ¥50,000 + ¥8,000/month
-Strategy:    Bi-weekly rebalance, graded sell (< 0.40), equal weight
-Return:      +168.98% (cumulative), +29.45% (annualized)
-Sharpe:      1.88
-Max DD:      -20.08%
-Trades:      347
-```
+├── features/YYYYMMDD.parquet     # alpha158 factor files (no dashes)
+├── alpha360/YYYYMMDD.parquet     # SR cache: 6 price+volume + 12 SR columns
+└── models/
+    ├── experiments/<name>/       # named experiment directory
+    │   ├── experiment.yaml       # full config snapshot
+    │   ├── model.pt              # or lightgbm_model_*.txt
+    │   ├── metrics.json
+    │   └── norm_params.json      # log_vol stats for inference
+    └── registry.json             # index of all experiments
 ```
 
 ## Gotchas
 
-- **Stale `__pycache__`** — if behavior seems wrong after a code change, `find . -name __pycache__ -not -path './.venv/*' -exec rm -rf {} +`
-- **`start_date` on DataSource** — for APIs with limited history (e.g. `stock_st` only has data from 2016), set `start_date = "20160101"` on the subclass to skip useless queries
-- **Future dates excluded** — Pipeline auto-filters trade_cal dates > today
-- **Tushare rate limits** — minute-level, Fetcher defaults to 12 retries at 5s intervals (60s total)
-- **`stock_st` is the API name** — tushare pro uses `stock_st` (not `stk_st`)
+### Data
+- **stock_st schema drift** — some files VARCHAR ts_code, others INTEGER. Always `read_parquet(..., union_by_name=true)` + `CAST(ts_code AS VARCHAR)`.
+- **`daily/` uses YYYY_MM_DD** underscores; **`features/` and `alpha360/` use YYYYMMDD** no dashes.
+- **vwap is computed** — `amount / vol` in base CTE. Not a raw tushare field.
+- **`stock_st` API name** — tushare pro uses `stock_st` not `stk_st`.
 
-**Factor DSL raw fields:**
+### Model training
+- **`--name` is required** for all training commands. Old `data/models/` path abandoned.
+- **`meta` stacking removed** — was ineffective, code cleaned up.
+- **`stride` default = 10** — stride=30 was too aggressive, not enough near-term samples.
+- **per-sequence normalization** — divide by last close, not global z-score. This removed stock-specific shortcuts.
+- **batch inference** — `SRInference.predict_batch()` runs one forward pass for all stocks, not per-stock loops.
 
-- `$open`, `$high`, `$low`, `$close`, `$volume`, `$amount`, `$vwap` — OHLCV from `daily/`
-- `$pe_ttm`, `$pb`, `$total_mv`, `$turnover_rate`, `$volume_ratio` — fundamentals from `daily_basic/` (joined in base CTE)
-- Operators: `REF(f,N)`, `MEAN(f,N)`, `STD(f,N)`, `SUM(f,N)`, `MAX(f,N)`, `MIN(f,N)`, `CORR(a,b,N)`, `DELTA(f,N)`, `RANK(f)`, `QUANTILE(f,N)`, `EMA(f,N)`, `RSI(f,N)`, `REG_SLOPE(f,N)`
-
-**FeatureEngine base CTE** joins `daily/` LEFT JOIN `daily_basic/` on `(ts_code, trade_date)`. If no daily_basic files exist, the columns are filled with NULL (backward-compatible with tests).
-
-New operators (`EMA`, `RSI`, `REG_SLOPE`) use pre-computed `__rn`, `__p{N}` positions and `__diff` columns in a `_rn`/`_rp` CTE before `_ts` to avoid DuckDB nested window function errors.
-
-### Feature pipeline gotchas
-
-- **`$vwap` is a column, not inline SQL** — vwap is computed in the engine's base CTE (`amount / NULLIF(vol, 0) AS vwap`). `compile()` replaces `$vwap` → `vwap` (plain column ref). Never expand `$vwap` to inline SQL — it breaks downstream `\w+` regex patterns.
-- **RANK/QUANTILE must be two CTEs** — wrapping a time-series expression inside RANK (e.g. `RANK(REF(...))`) requires an inner CTE (with `w_time` window) and an outer CTE (pure ranking, no `w_time`). DuckDB rejects nested window functions. The engine handles this automatically — do not attempt single-CTE for RANK/QUANTILE factors.
-- **Batch processing** — pipeline processes dates in batches of 20. Each batch builds the CTE chain once and filters by date range (`WHERE trade_date BETWEEN`). Do not change to per-date processing without re-benchmarking (single date: 0.86s, batch of 20: ~3s).
-- **Factor dependencies** — alpha158 factors only depend on `$raw` fields, not other factors. The topo sort exists for future factor sets that build chains of derived factors. Adding a cycle between factors raises `ValueError`.
-
-## Architecture: model training (`src/alpha_quat/model/`)
-
-| Module | Purpose |
-|--------|---------|
-| `data.py` | `DatasetBuilder` — DuckDB-based data loader. Reads features + daily + daily_basic, filters universe (main board - ST), computes channel-position labels (5d/20d/60d) via LEAD/window functions, returns `DatasetResult` |
-| `lightgbm/config.py` | `LightGBMConfig` dataclass — train/val date ranges, base hyperparams, Optuna trials, feature subset for pruning |
-| `lightgbm/train.py` | `LightGBMTrainer` — native `lgb.train` with optional Optuna tuning (TimeSeriesSplit CV, minimize MSE) |
-| `lightgbm/evaluate.py` | `LightGBMEvaluator` — MSE/MAE, per-date Spearman Rank IC, ICIR, feature importance (gain) top5/bottom5 |
-| `lightgbm/pipeline.py` | `LightGBMPipeline` — orchestrator: build → train 3 models → evaluate → save models + results.json |
-| `predict.py` | `predict()` — daily inference: load models + latest features, score universe, show top-K and holdings ranking |
-| `meta.py` | `Meta model (stacking)` — learns to combine 9 quantile predictions, trained after base models |
-| `rolling.py` | `Rolling backtest` — 8-fold expanding window retrain + backtest (6-month intervals) |
-
-**Labels:** Channel position — `(close_{t+n} - min_low_{t:t+n}) / (max_high_{t:t+n} - min_low_{t:t+n})`. Values in [0,1]. Computed via LEAD + MIN/MAX window functions (O(n)), NOT range joins.
-
-**Model files:** `data/models/lightgbm_model_{5d,20d,60d}.txt` + `results.json`
-
-### Model gotchas
-
-- **DatasetBuilder uses DuckDB** — not pandas. Parquet reads use `union_by_name=true` + explicit CAST to handle stock_st schema drift across files.
-- **Label columns excluded** — `factor_cols` filter uses `c != "ts_code" and not c.startswith("trade_date")`, so `ret_5d`/`ret_20d`/`ret_60d` columns don't leak into features.
-- **Feature rebuild before model** — new factors require `uv run alpha-quat feature --rebuild` before training.
-- **--rebuild --since combo** — now works: `--rebuild --since 20180101` clears old files then computes from 2018 onward.
-- **max_offset=60** for 60d labels — needs 60 extra trading days of daily data for LEAD(close,60).
-- **Holdings YAML** — `data/holdings.yaml` stores current portfolio with ts_code, shares, avg_cost. Used by `alpha-quat predict`.
-- **Zero-gain features auto-excluded** — `model/data.py` defines `_ZERO_GAIN_FEATURES` (30 consistently useless factors). These are excluded from training AND inference by default. When training with `lambdarank` mode, the model's feature count differs from the full feature set — MLSignalGenerator filters `_ZERO_GAIN` during generate() to match.
-- **Memory: `fetchdf()` on 4+ years × 200+ cols ≈ 10GB** — reduce training range (3 years) or use `--features` with a curated subset to keep pandas under memory limits. Using `--train-start 20190101` reduces rows by ~25%.
-- **Quantile mode is stable, lambdarank is experimental** — quantile median ensemble (ICIR 1.0+) backtests at Sharpe 1.88. Lambdarank has comparable ICIR but negative backtest returns due to unbounded score scaling.
-- **Feature rebuild before model** — new factors require `uv run alpha-quat feature --rebuild` before training.
-- **--rebuild --since combo** — now works: `--rebuild --since 20180101` clears old files then computes from 2018 onward.
-
-## Architecture: strategy (`src/alpha_quat/strategy/`)
-
-| Module | Purpose |
-|--------|---------|
-| `types.py` | `StrategyContext` (trade_date, capital, universe, prices, prev_holdings, constraints), `SignalResult`, `StrategyResult` — all dataclasses |
-| `signal.py` | `ISignalGenerator` ABC — one abstract method: `generate(features, ctx) -> SignalResult` |
-| `position.py` | `IPositionManager` ABC — three abstract methods: `allocate(signals, ctx) -> DataFrame`, `constrain(positions, ctx) -> DataFrame`, `execute(target, prev, ctx) -> tuple[DataFrame, DataFrame]` |
-| `strategy.py` | `Strategy` — concrete pipeline orchestrator, constructor-injects `ISignalGenerator` + `IPositionManager`, `run()` chains: generate → allocate → constrain → execute |
-
-**Pipeline contract:**
-
-```
-feature DataFrame (ts_code, trade_date, factors...)
-    │
-    ▼
-ISignalGenerator.generate(features, ctx)          → SignalResult (ts_code, score)
-    │
-    ▼
-IPositionManager.allocate(signals, ctx)            → positions (ts_code, target_weight)
-    │
-    ▼
-IPositionManager.constrain(positions, ctx)         → positions (clamped weights)
-    │
-    ▼
-IPositionManager.execute(positions, prev, ctx)     → (positions, orders)
-    │
-    ▼
-StrategyResult(target_positions, orders, metadata)
-```
-
-**Key rules:**
-
-- **Strategy code never does I/O** — all data flows in via method parameters (DataFrame, StrategyContext). No file reading, no API calls inside strategy code.
-- **DataFrame schema is the contract** between stages — no intermediate DTO classes.
-- **Signal answers "what to trade"** (score). **Position answers "how much and how"** (weight, shares, orders).
-- **Dependency injection** — `Strategy(signal, position)`; any ISignalGenerator + any IPositionManager works.
-- **Pipeline order is immutable** — generate → allocate → constrain → execute. No skipping stages.
-- **`prev_holdings` can be `None`** — first trading day, no prior positions. `execute()` must handle it.
-- **`target_shares` is computed in `execute()`** — needs price from `ctx.prices` (not in `allocate()`).
-
-## Architecture: backtesting (`src/alpha_quat/backtest/`)
-
-| Module | Purpose |
-|--------|---------|
-| `config.py` | `BacktestConfig` dataclass — start/end dates, capital, monthly_addition, commission, stop_loss, top_k, model_dir, rebalance_interval, sell_threshold, daily_monitor, sell_score_percentile |
-| `filters.py` | `build_universe(date, data_dir)` — filters to main board (`stock_basic.market == "主板"`) excluding ST stocks |
-| `portfolio.py` | `Portfolio` — cash, holdings (100-share lots), snapshots, trade log. `buy()`/`sell()` with commission. `update_peak_prices()` for dynamic stop-loss |
-| `engine.py` | `BacktestEngine` — day-by-day loop: monthly addition, dynamic stop-loss (peak-price based), graded sell, T+1 open execution. Supports both MACross and ML signal modes |
-| `metrics.py` | `compute_metrics()` — cumulative/annualized return, max drawdown, Sharpe, win rate. Adjusts for capital additions in daily returns |
-| `report.py` | `generate_html_report()` — self-contained HTML with matplotlib charts (base64 embedded) |
-
-**Timing model:** Signal at close of day T (from `features/YYYYMMDD.parquet`) → execute at open of day T+1. Stop loss checked at T-1 close → sell at T open. Dynamic stop-loss uses peak price since purchase (not entry cost).
-
-**Engine does NOT use `Strategy.run()`** — calls `ISignalGenerator.generate()` at EOD and `IPositionManager` methods at next open, bypassing the synchronous `Strategy.run()` chain. This is required for T+1 execution timing.
-
-**Rebalance modes (ML):**
-- `rebalance_interval=N` — rebalance every N trading days (5=weekly, 10=bi-weekly). On rebalance day: compute target=Top-K, sell stocks outside Top-K with score < sell_threshold (default 0.40).
-- `--daily-monitor` — continuous daily mode. Score daily → sell holdings below sell_score_percentile (e.g. 0.20 = bottom 20%) or hit stop-loss → buy highest-scored not-held stock.
-
-**Position sizing:**
-- `--weighting equal` — equal weights (default, best performance)
-- `--weighting kelly` — proportional to mean/var ratio (higher return, higher risk)
-- `--weighting vol_parity` — proportional to 1/volatility (lowest drawdown)
-- `--weighting score_momentum` — bonus for repeated Top-K appearances
-
-**Existing strategy implementations:**
-- `strategy/signals/ma_cross.py` — `MACrossSignal`: golden/dead cross detection via `KLEN35`/`KLEN36` factors
-- `strategy/signals/ml_signal.py` — `MLSignalGenerator`: auto-detects model mode (meta → lambdarank → quantile → regression). Ensemble of 3 LightGBM models (5d/20d/60d), ICIR-weighted score
-- `strategy/positions/equal_weight.py` — `EqualWeightTopKPosition`: top-K equal weight allocation with share lot rounding
-
-### Data gotchas
-
-- **stock_st schema inconsistency** — some files have VARCHAR ts_code, others INTEGER. Always use `read_parquet(..., union_by_name=true)` + explicit `CAST(ts_code AS VARCHAR)` when reading stock_st. Same for daily parquet across different years.
-- **features path uses YYYYMMDD (no dashes)** — unlike daily/ which uses hive-style `YYYY_MM_DD`. `BacktestEngine` and `DatasetBuilder` read `features/{trade_date}.parquet` where trade_date is `20240115` not `2024_01_15`.
-- **Must run fetch+feature before backtest/model** — `engine.py` and `data.py` read from `data/` subdirectories. All must exist.
-- **matplotlib is a required dep** — added for HTML report charts. Listed in `pyproject.toml`.
-
-## Adding a new data source
-
-1. Create `src/alpha_quat/data/sources/<name>.py` as a DataSource subclass with api_name, partition_by, fields
-2. Create `tests/test_sources/test_<name>.py` (test api_name, partition_by, get_params, path_for)
-3. Register in `cli.py` `ALL_SOURCES` dict
-4. If data doesn't go back to 1990, set `start_date` on the class
-
-## Adding a new factor set
-
-1. Create `src/alpha_quat/features/alphasets/<name>.py` with a `build_<name>() -> FactorRegistry` function
-2. Add to `cli.py` `ALL_FEATURE_SETS` dict as `"name": "alpha_quat.features.alphasets.<name>:build_<name>"`
-3. Define `Factor` instances using the DSL: `$close`, `$volume`, `$amount`, `$open`, `$high`, `$low`, `$vwap` for raw fields; `REF(f, N)`, `MEAN(f, N)`, `STD(f, N)`, `SUM(f, N)`, `MAX(f, N)`, `MIN(f, N)`, `CORR(f1, f2, N)`, `DELTA(f, N)`, `RANK(f)`, `QUANTILE(f, N)` for operators
-4. Create `tests/test_features/test_<name>.py` verifying: all compile, no cycles, valid deps, lookback consistent
-
-## Adding a new strategy component
-
-### Adding a new signal strategy
-1. Create `src/alpha_quat/strategy/signals/<name>.py` subclassing `ISignalGenerator`
-2. Implement `generate(features: DataFrame, ctx: StrategyContext) -> SignalResult`
-3. Create `tests/test_strategy/test_<name>.py` (verify SignalResult columns, edge cases)
-
-### Adding a new position manager
-1. Create `src/alpha_quat/strategy/positions/<name>.py` subclassing `IPositionManager`
-2. Implement all three methods: `allocate()`, `constrain()`, `execute()`
-3. Create `tests/test_strategy/test_<name>.py` (verify each step's output schema)
+### Backtest
+- **SR backtest (`backtest-sr`) is separate** from `engine.py`. Do not add SR if/else to `engine.py`.
+- **pre-loads all alpha360 data** once before the day loop for performance.
+- **Price-triggered execution** — checks daily high/low vs target price. `unfilled_signals` tracks price not met.
+- **Holding.stop_price** — support-level stop loss stored per position. Portfolio.buy() accepts `stop_price=` parameter.
+- **Support predictions are weaker than resistance** — 25% win rate strategy with high-reward tail.
