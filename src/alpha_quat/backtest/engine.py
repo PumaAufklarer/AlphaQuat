@@ -199,9 +199,6 @@ class BacktestEngine:
                     meta = signal_result.metadata
                     has_ci = "ci_width" in meta and "confidence" in meta
                     if has_ci:
-                        ci_map = dict(
-                            zip(signal_result.signals["ts_code"], meta["ci_width"])
-                        )
                         conf_map = dict(
                             zip(signal_result.signals["ts_code"], meta["confidence"])
                         )

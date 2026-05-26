@@ -13,7 +13,6 @@ def test_register():
     assert "regression" in VARIANTS
     assert "quantile" in VARIANTS
     assert "lambdarank" in VARIANTS
-    assert "meta" in VARIANTS
 
 
 def test_zero_gain_is_set():

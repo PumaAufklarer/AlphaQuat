@@ -49,7 +49,7 @@ class TestExperimentRegistry:
 
     def test_registry_persists_across_instances(self, tmp_path):
         reg1 = ExperimentRegistry(tmp_path)
-        reg1.register(ExperimentConfig(name="persist", mode="meta"))
+        reg1.register(ExperimentConfig(name="persist", mode="lambdarank"))
         reg2 = ExperimentRegistry(tmp_path)
         entries = reg2.list_experiments()
         assert len(entries) == 1

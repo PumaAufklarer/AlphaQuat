@@ -1,4 +1,6 @@
-VARIANTS: dict[str, type] = {}
+from alpha_quat.strategy.signals.variants.baseline import BaseMLSignal
+
+VARIANTS: dict[str, type[BaseMLSignal]] = {}
 
 
 def register(cls):
@@ -6,4 +8,6 @@ def register(cls):
     return cls
 
 
-from . import regression_signal, quantile_signal, lambdarank_signal, meta_signal
+from alpha_quat.strategy.signals.variants import regression_signal  # noqa: F401, E402
+from alpha_quat.strategy.signals.variants import quantile_signal  # noqa: F401, E402
+from alpha_quat.strategy.signals.variants import lambdarank_signal  # noqa: F401, E402

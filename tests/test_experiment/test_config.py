@@ -25,8 +25,7 @@ class TestExperimentConfig:
         assert cfg.tune is True
         assert cfg.feature_names is None
         assert cfg.quantile_alphas is None
-        assert cfg.meta_start is None
-        assert cfg.meta_end is None
+
         assert isinstance(cfg.created_at, str)
 
     def test_experiment_config_yaml_roundtrip(self, tmp_path):
@@ -51,8 +50,6 @@ class TestExperimentConfig:
             tune=False,
             feature_names=["KLEN35", "KMID5"],
             quantile_alphas=[0.1, 0.5, 0.9],
-            meta_start="20230101",
-            meta_end="20231231",
             created_at="2025-01-01T00:00:00",
         )
         cfg.save(path)
@@ -85,8 +82,6 @@ class TestExperimentConfig:
             "tune",
             "feature_names",
             "quantile_alphas",
-            "meta_start",
-            "meta_end",
             "created_at",
         ):
             assert getattr(loaded, key) == getattr(cfg, key), f"Mismatch for {key}"

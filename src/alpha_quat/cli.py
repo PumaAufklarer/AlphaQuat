@@ -330,7 +330,7 @@ def _build_model_parser(subparsers):
     lgb_parser = model_sub.add_parser("lightgbm", help="LightGBM stock selection model")
     lgb_parser.add_argument(
         "variant",
-        choices=["regression", "quantile", "lambdarank", "meta"],
+        choices=["regression", "quantile", "lambdarank"],
         help="Model variant to train",
     )
     lgb_parser.add_argument(
@@ -353,12 +353,7 @@ def _build_model_parser(subparsers):
     lgb_parser.add_argument(
         "--features", default=None, help="Comma-separated feature subset"
     )
-    lgb_parser.add_argument(
-        "--meta-start", default=None, help="Meta model training start YYYYMMDD"
-    )
-    lgb_parser.add_argument(
-        "--meta-end", default=None, help="Meta model training end YYYYMMDD"
-    )
+
     return model_parser
 
 
@@ -368,9 +363,7 @@ def _cmd_model(args, config):
         if args.features:
             feature_names = [f.strip() for f in args.features.split(",") if f.strip()]
 
-        quantile_alphas = (
-            [0.1, 0.5, 0.9] if args.variant in ("quantile", "meta") else None
-        )
+        quantile_alphas = [0.1, 0.5, 0.9] if args.variant == "quantile" else None
 
         exp_cfg = ExpConfig(
             name=args.name,
@@ -383,8 +376,6 @@ def _cmd_model(args, config):
             tune=not args.no_tune,
             feature_names=feature_names,
             quantile_alphas=quantile_alphas,
-            meta_start=args.meta_start,
-            meta_end=args.meta_end,
         )
         run_variant(config.data_dir, exp_cfg)
         print(f"\nExperiment '{args.name}' completed successfully.")

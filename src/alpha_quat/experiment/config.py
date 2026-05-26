@@ -31,8 +31,6 @@ class ExperimentConfig:
     feature_names: list[str] | None = None
 
     quantile_alphas: list[float] | None = None
-    meta_start: str | None = None
-    meta_end: str | None = None
 
     created_at: str = field(
         default_factory=lambda: datetime.now().isoformat(timespec="seconds")
