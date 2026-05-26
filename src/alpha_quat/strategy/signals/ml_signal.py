@@ -1,6 +1,9 @@
 """MLSignalGenerator — scores stocks using ensemble of LightGBM models.
 
 Detection order: meta → lambdarank → quantile → regression.
+
+Deprecated: Use signal variant classes from `alpha_quat.strategy.signals.variants`
+instead (RegressionSignal, QuantileSignal, LambdaRankSignal, MetaSignal).
 """
 
 import logging
