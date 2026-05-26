@@ -1,13 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class LightGBMConfig:
-    train_start: str = "20240401"
-    train_end: str = "20250430"
-    val_start: str = "20250501"
-    val_end: str = "20260430"
-
     num_leaves: int = 31
     learning_rate: float = 0.05
     n_estimators: int = 200
@@ -22,8 +17,3 @@ class LightGBMConfig:
     tune: bool = True
 
     feature_names: list[str] | None = None
-
-    quantile_alphas: list[float] | None = field(default_factory=lambda: None)
-    meta_start: str | None = None
-    meta_end: str | None = None
-    lambdarank: bool = False

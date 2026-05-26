@@ -8,6 +8,8 @@ from alpha_quat.experiment.registry import ExperimentRegistry
 from alpha_quat.model.data import DatasetBuilder
 from alpha_quat.model.lightgbm.evaluate import LightGBMEvaluator
 
+_H = {"5d": "5", "20d": "20", "60d": "60"}
+
 
 class LightGBMBasePipeline(ABC):
     mode: str = ""
@@ -42,7 +44,7 @@ class LightGBMBasePipeline(ABC):
             eval_result = self.evaluator.evaluate(
                 model=model,
                 X_val=data.X_val,
-                y_val=getattr(data, f"y_val_{suffix}"),
+                y_val=getattr(data, f"y_val_{_H.get(suffix, suffix)}"),
                 val_dates=data.val_dates,
                 val_codes=data.val_codes,
                 best_params={},

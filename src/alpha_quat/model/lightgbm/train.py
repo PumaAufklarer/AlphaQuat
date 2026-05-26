@@ -24,10 +24,6 @@ class LightGBMTrainer:
     @classmethod
     def from_config(cls, config: ExperimentConfig) -> "LightGBMTrainer":
         lgb_cfg = LightGBMConfig(
-            train_start=config.train_start,
-            train_end=config.train_end,
-            val_start=config.val_start,
-            val_end=config.val_end,
             num_leaves=config.num_leaves,
             learning_rate=config.learning_rate,
             n_estimators=config.n_estimators,
@@ -40,10 +36,6 @@ class LightGBMTrainer:
             n_trials=config.n_trials,
             tune=config.tune,
             feature_names=config.feature_names,
-            quantile_alphas=config.quantile_alphas,
-            meta_start=config.meta_start,
-            meta_end=config.meta_end,
-            lambdarank=(config.mode == "lambdarank"),
         )
         return cls(lgb_cfg)
 

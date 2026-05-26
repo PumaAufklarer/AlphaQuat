@@ -15,8 +15,8 @@ class QuantilePipeline(LightGBMBasePipeline):
         X = data.X_train
         alphas = config.quantile_alphas or [0.1, 0.5, 0.9]
         models = {}
-        for h_name in ("5d", "20d", "60d"):
-            y = getattr(data, f"y_train_{h_name}")
+        for h_name, h in [("5d", 5), ("20d", 20), ("60d", 60)]:
+            y = getattr(data, f"y_train_{h}")
             for alpha in alphas:
                 suffix = f"{h_name}_alpha_{alpha}"
                 model, _ = trainer.train(X, y, label_name=suffix, quantile_alpha=alpha)

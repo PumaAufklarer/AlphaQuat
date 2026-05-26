@@ -1,12 +1,11 @@
-import json
 import tempfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from alpha_quat.model.lightgbm.config import LightGBMConfig
-from alpha_quat.model.lightgbm.pipeline import LightGBMPipeline
+from alpha_quat.experiment.config import ExperimentConfig
+from alpha_quat.model.lightgbm.pipeline import run_variant
 
 RNG = np.random.RandomState(42)
 
@@ -148,7 +147,9 @@ class TestLightGBMPipeline:
             data_dir = Path(tmp)
             _make_synthetic_data(data_dir)
 
-            config = LightGBMConfig(
+            config = ExperimentConfig(
+                name="test_run",
+                mode="regression",
                 train_start="20240102",
                 train_end="20240108",
                 val_start="20240109",
@@ -158,29 +159,18 @@ class TestLightGBMPipeline:
                 num_leaves=5,
             )
 
-            pipeline = LightGBMPipeline(data_dir, config)
-            results = pipeline.run()
+            results = run_variant(data_dir, config)
 
             assert "5d" in results
             assert "20d" in results
             assert "60d" in results
-            assert results["5d"]["5d"].mse >= 0
-            assert results["20d"]["20d"].mse >= 0
-            assert results["60d"]["60d"].mse >= 0
-            assert len(results["5d"]["5d"].top5_features) == 5
+            assert results["5d"].mse >= 0
+            assert results["20d"].mse >= 0
+            assert results["60d"].mse >= 0
+            assert len(results["5d"].top5_features) == 5
 
-            models_dir = data_dir / "models"
-            assert (models_dir / "lightgbm_model_5d.txt").exists()
-            assert (models_dir / "lightgbm_model_20d.txt").exists()
-            assert (models_dir / "lightgbm_model_60d.txt").exists()
-            assert (models_dir / "results.json").exists()
-
-            with open(models_dir / "results.json") as f:
-                results_json = json.load(f)
-            assert results_json["model_type"] == "lightgbm"
-            assert "5d" in results_json
-            assert "20d" in results_json
-            assert "60d" in results_json
-            assert "mse" in results_json["5d"]
-            assert "mean_ic" in results_json["5d"]
-            assert "top5_features" in results_json["5d"]
+            exp_dir = data_dir / "models" / "experiments" / "test_run"
+            assert (exp_dir / "lightgbm_model_5d.txt").exists()
+            assert (exp_dir / "lightgbm_model_20d.txt").exists()
+            assert (exp_dir / "lightgbm_model_60d.txt").exists()
+            assert (exp_dir / "experiment.yaml").exists()
