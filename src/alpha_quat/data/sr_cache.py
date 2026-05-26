@@ -149,12 +149,16 @@ def _process_one_stock(df: pd.DataFrame) -> pd.DataFrame:
 def build_cache(data_dir: Path) -> int:
     """Build alpha360 cache. Returns number of date files written."""
     all_df = _load_all_daily(data_dir)
-    ts_codes = all_df["ts_code"].unique()
-    logger.info("Loaded %d daily rows across %d stocks", len(all_df), len(ts_codes))
+    logger.info(
+        "Loaded %d daily rows across %d stocks",
+        len(all_df),
+        all_df["ts_code"].nunique(),
+    )
 
     results: list[pd.DataFrame] = []
-    for ts_code in tqdm(ts_codes, desc="Processing stocks"):
-        stock_df = all_df[all_df["ts_code"] == ts_code].copy()
+    for ts_code, stock_df in tqdm(
+        all_df.groupby("ts_code", sort=False), desc="Processing stocks"
+    ):
         processed = _process_one_stock(stock_df)
         results.append(processed)
 
