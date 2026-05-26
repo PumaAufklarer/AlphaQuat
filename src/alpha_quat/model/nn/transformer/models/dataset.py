@@ -67,13 +67,15 @@ def _normalize(
 def _build_sequences(
     df: pd.DataFrame, seq_length: int, stride: int, n_bins: int, price_range: float
 ):
-    """Build (X, y) sequences from per-stock data.
+    """Build (X, y, mask) sequences from per-stock data.
 
     X: (seq_length, 6) normalized features
-    y: (6, n_bins) probability distributions over bins
+    y: (6, n_bins) probability distributions (placeholders for invalid)
+    mask: (6,) bool — True where SR label was valid
     """
     features = []
     labels = []
+    masks = []
 
     for ts_code, stock_df in df.groupby("ts_code"):
         stock_df = stock_df.sort_values("trade_date").reset_index(drop=True)
@@ -82,57 +84,54 @@ def _build_sequences(
 
         for i in range(0, len(stock_df) - seq_length, stride):
             x = vals[i : i + seq_length]
-            sr = sr_vals[i + seq_length - 1]  # SR labels at end of window
+            sr = sr_vals[i + seq_length - 1]
 
-            # Skip if any feature is NaN
             if np.isnan(x).any():
                 continue
 
-            # Skip if all SR labels are NaN (no levels found)
             if np.isnan(sr).all():
                 continue
 
-            # Create one-hot-like distribution for each label
+            mask = ~np.isnan(sr)  # (6,) bool
+
             y = np.zeros((6, n_bins), dtype=np.float32)
-            for j, sr_val in enumerate(sr):
-                if np.isnan(sr_val):
-                    y[j, :] = 1.0 / n_bins  # uniform = uncertain
-                else:
-                    # Bin index: (sr_val - close[-1]) / close[-1] mapped to [-price_range, +price_range]
-                    close_last = vals[i + seq_length - 1, 3]  # close is col 3
-                    ratio = (sr_val - close_last) / close_last
+            for j in range(6):
+                if mask[j]:
+                    close_last = vals[i + seq_length - 1, 3]
+                    ratio = (sr[j] - close_last) / close_last
                     bin_idx = int((ratio / price_range + 1) * n_bins / 2)
                     bin_idx = max(0, min(n_bins - 1, bin_idx))
-                    # Gaussian blur
                     sigma = 2
                     for k in range(n_bins):
                         y[j, k] = np.exp(-((k - bin_idx) ** 2) / (2 * sigma**2))
-                    # Renormalize
                     y_sum = y[j].sum()
                     if y_sum > 0:
                         y[j] /= y_sum
 
             features.append(x)
             labels.append(y)
+            masks.append(mask)
 
     if not features:
         raise ValueError("No valid sequences built")
 
-    X = np.stack(features)  # (N, 60, 6)
-    Y = np.stack(labels)  # (N, 6, 100)
-    return X, Y
+    X = np.stack(features)
+    Y = np.stack(labels)
+    M = np.stack(masks)
+    return X, Y, M
 
 
 class SRSequenceDataset(Dataset):
-    def __init__(self, X: np.ndarray, Y: np.ndarray):
+    def __init__(self, X: np.ndarray, Y: np.ndarray, mask: np.ndarray):
         self.X = torch.from_numpy(X).float()
         self.Y = torch.from_numpy(Y).float()
+        self.mask = torch.from_numpy(mask).bool()
 
     def __len__(self):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.Y[idx]
+        return self.X[idx], self.Y[idx], self.mask[idx]
 
 
 def build_datasets(
@@ -166,7 +165,7 @@ def build_datasets(
         config.seq_length,
         config.stride,
     )
-    X_tr, Y_tr = _build_sequences(
+    X_tr, Y_tr, M_tr = _build_sequences(
         train_norm, config.seq_length, config.stride, config.n_bins, config.price_range
     )
     logger.info("Train: %d sequences", len(X_tr))
@@ -176,9 +175,13 @@ def build_datasets(
         config.seq_length,
         config.stride,
     )
-    X_val, Y_val = _build_sequences(
+    X_val, Y_val, M_val = _build_sequences(
         val_norm, config.seq_length, config.stride, config.n_bins, config.price_range
     )
     logger.info("Val: %d sequences", len(X_val))
 
-    return SRSequenceDataset(X_tr, Y_tr), SRSequenceDataset(X_val, Y_val), norm_params
+    return (
+        SRSequenceDataset(X_tr, Y_tr, M_tr),
+        SRSequenceDataset(X_val, Y_val, M_val),
+        norm_params,
+    )
