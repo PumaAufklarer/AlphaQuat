@@ -76,6 +76,51 @@ class SRInference:
         ]
         return {name: probs[i] for i, name in enumerate(names)}
 
+    def predict_batch(self, sequences: np.ndarray) -> np.ndarray:
+        """Batch inference: (B, 60, 6) → (B, 6, 100) probabilities."""
+        tensor = torch.from_numpy(sequences).float().to(_DEVICE)
+        with torch.no_grad():
+            logits = self.model(tensor)
+        return torch.softmax(logits, dim=-1).cpu().numpy()
+
+    def compute_entry_exit_batch(
+        self, sequences: np.ndarray, close_prices: np.ndarray
+    ) -> list[dict]:
+        """Batch entry/exit: (B, 60, 6) → list of per-stock signal dicts."""
+        probs = self.predict_batch(sequences)
+        n_bins = self.config.n_bins
+        price_range = self.config.price_range
+        bin_centers = np.linspace(-price_range, price_range, n_bins)
+
+        results = []
+        for i in range(probs.shape[0]):
+            p = probs[i]
+            expected_up = float((p[0] * bin_centers).sum())  # resistance_5d at idx 0
+            expected_down = float(-(p[3] * bin_centers).sum())  # support_5d at idx 3
+            rr_ratio = expected_up / max(expected_down, 1e-6)
+
+            near_sup = (bin_centers > -expected_down - 0.01) & (
+                bin_centers < -expected_down + 0.01
+            )
+            support_confidence = float(p[3][near_sup].sum())
+            near_res = (bin_centers > expected_up - 0.01) & (
+                bin_centers < expected_up + 0.01
+            )
+            resistance_confidence = float(p[0][near_res].sum())
+
+            results.append(
+                {
+                    "entry": rr_ratio > 2.0 and support_confidence > 0.1,
+                    "exit": resistance_confidence > 0.3,
+                    "rr_ratio": rr_ratio,
+                    "expected_up": expected_up,
+                    "expected_down": -expected_down,
+                    "support_confidence": support_confidence,
+                    "resistance_confidence": resistance_confidence,
+                }
+            )
+        return results
+
     def compute_entry_exit(self, sequence: np.ndarray, close_price: float) -> dict:
         """Compute entry/exit signals from SR predictions."""
         probs = self.predict(sequence)
