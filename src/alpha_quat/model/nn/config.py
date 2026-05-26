@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class TransformerConfig:
     # Data
     seq_length: int = 60
+    stride: int = 30
     n_features: int = 6
     n_bins: int = 100
     price_range: float = 0.20

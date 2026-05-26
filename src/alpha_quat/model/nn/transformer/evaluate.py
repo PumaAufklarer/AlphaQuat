@@ -43,20 +43,21 @@ def evaluate(
 
         for h_idx in range(6):
             h_name = _HORIZON_NAMES[h_idx]
-            h_mask = m[:, h_idx]
+            h_mask = m[:, h_idx]  # float weight
+            h_valid = h_mask > 0  # convert to bool for indexing
 
-            if h_mask.sum() == 0:
+            if h_valid.sum() == 0:
                 continue
 
             per_sample = F.cross_entropy(
                 logits[:, h_idx], y[:, h_idx], reduction="none"
             )
-            horizon_losses[h_name].extend(per_sample[h_mask].cpu().numpy().tolist())
+            horizon_losses[h_name].extend(per_sample[h_valid].cpu().numpy().tolist())
 
             true_bin = y[:, h_idx]
             _, top3 = probs[:, h_idx].topk(3, dim=1)
             top3_hit = (top3 == true_bin.unsqueeze(1)).any(dim=1).float()
-            horizon_top3[h_name].extend(top3_hit[h_mask].cpu().numpy().tolist())
+            horizon_top3[h_name].extend(top3_hit[h_valid].cpu().numpy().tolist())
 
         entropies = -(probs * torch.log(probs + 1e-8)).sum(dim=-1)
         all_entropies.extend(entropies.mean(dim=1).cpu().numpy().tolist())

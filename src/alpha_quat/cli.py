@@ -389,6 +389,9 @@ def _build_model_parser(subparsers):
     nn_parser.add_argument(
         "--val-end", default="20240630", help="Validation end YYYYMMDD"
     )
+    nn_parser.add_argument(
+        "--tune", action="store_true", help="Run grid search over hyperparams"
+    )
 
     return model_parser
 
@@ -427,9 +430,14 @@ def _cmd_model(args, config):
             val_start=args.val_start,
             val_end=args.val_end,
         )
-        from alpha_quat.model.nn.pipeline import run_variant_nn
+        if args.tune:
+            from alpha_quat.model.nn.tune import grid_search
 
-        run_variant_nn(config.data_dir, exp_cfg)
+            grid_search(config.data_dir, exp_cfg)
+        else:
+            from alpha_quat.model.nn.pipeline import run_variant_nn
+
+            run_variant_nn(config.data_dir, exp_cfg)
         print(f"\nNN Experiment '{args.name}' completed successfully.")
         print(
             f"Models saved to: {config.data_dir / 'models' / 'experiments' / args.name}"
