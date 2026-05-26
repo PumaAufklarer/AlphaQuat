@@ -2,13 +2,12 @@
 
 import json
 import logging
-import shutil
 from pathlib import Path
 
 from alpha_quat.backtest.config import BacktestConfig
 from alpha_quat.backtest.engine import BacktestEngine
-from alpha_quat.model.lightgbm.config import LightGBMConfig
-from alpha_quat.model.lightgbm.pipeline import LightGBMPipeline
+from alpha_quat.experiment.config import ExperimentConfig
+from alpha_quat.model.lightgbm.pipeline import run_variant
 
 logger = logging.getLogger(__name__)
 
@@ -34,19 +33,18 @@ _BACKTEST_ARGS = {
 }
 
 
-def run_rolling(data_dir: Path) -> list[dict]:
+def run_rolling(data_dir: Path, experiment_name: str = "rolling") -> list[dict]:
     """Run 8-fold rolling retrain + backtest.
 
     Each fold:
       1. Train quantile models on expanding window (--no-tune)
-      2. Save models to data/models/fold_N/
-      3. Run backtest on validation window
+      2. Save models via experiment system
+      3. Run backtest on validation window using experiment
       4. Collect metrics
     """
     results = []
     for i, (tr_s, tr_e, val_s, val_e) in enumerate(_FOLDS):
-        fold_dir = data_dir / "models" / f"fold_{i + 1}"
-        fold_dir.mkdir(parents=True, exist_ok=True)
+        fold_name = f"{experiment_name}_fold_{i + 1}"
 
         logger.info("=" * 60)
         logger.info(
@@ -60,8 +58,10 @@ def run_rolling(data_dir: Path) -> list[dict]:
         )
         logger.info("=" * 60)
 
-        # Train quantile models
-        cfg = LightGBMConfig(
+        # Train quantile models via experiment system
+        exp_cfg = ExperimentConfig(
+            name=fold_name,
+            mode="quantile",
             train_start=tr_s,
             train_end=tr_e,
             val_start=tr_s,
@@ -72,14 +72,9 @@ def run_rolling(data_dir: Path) -> list[dict]:
             tune=False,
             quantile_alphas=[0.1, 0.5, 0.9],
         )
-        pipeline = LightGBMPipeline(data_dir, cfg)
-        pipeline.run()
+        run_variant(data_dir, exp_cfg)
 
-        # Copy models to fold directory
-        for f in data_dir.glob("models/lightgbm_model_*.txt"):
-            shutil.copy2(f, fold_dir / f.name)
-
-        # Run backtest
+        # Run backtest using experiment
         bt_cfg = BacktestConfig(
             start_date=val_s,
             end_date=val_e,
@@ -88,7 +83,7 @@ def run_rolling(data_dir: Path) -> list[dict]:
             commission_rate=0.0005,
             stop_loss_pct=_BACKTEST_ARGS["stop_loss"],
             top_k=_BACKTEST_ARGS["top_k"],
-            model_dir=str(fold_dir),
+            experiment_name=fold_name,
             rebalance_interval=_BACKTEST_ARGS["rebalance_interval"],
             sell_threshold=_BACKTEST_ARGS["sell_threshold"],
         )

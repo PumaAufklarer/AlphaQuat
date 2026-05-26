@@ -17,8 +17,9 @@ from alpha_quat.data.sources.daily_basic import DailyBasicSource
 from alpha_quat.backtest.config import BacktestConfig
 from alpha_quat.backtest.engine import BacktestEngine
 from alpha_quat.backtest.report import generate_html_report
-from alpha_quat.model.lightgbm.config import LightGBMConfig
-from alpha_quat.model.lightgbm.pipeline import LightGBMPipeline
+from alpha_quat.experiment.config import ExperimentConfig as ExpConfig
+from alpha_quat.experiment.registry import ExperimentRegistry
+from alpha_quat.model.lightgbm.pipeline import run_variant
 
 ALL_SOURCES = {
     "stock_basic": StockBasicSource,
@@ -127,6 +128,9 @@ def _build_backtest_parser(subparsers):
         choices=["equal", "vol_parity", "score_momentum", "kelly"],
         help="Position sizing strategy (default: equal)",
     )
+    parser.add_argument(
+        "--experiment", default=None, help="Experiment name for ML signal"
+    )
     return parser
 
 
@@ -137,6 +141,9 @@ def _build_predict_parser(subparsers):
     parser.add_argument("--holdings", default=None, help="Path to holdings YAML file")
     parser.add_argument(
         "--top-k", type=int, default=10, help="Number of top picks to show"
+    )
+    parser.add_argument(
+        "--experiment", default=None, help="Experiment name for model loading"
     )
     return parser
 
@@ -192,6 +199,9 @@ def _cmd_predict(args, config):
             data = yaml.safe_load(f)
         holdings = data.get("holdings", [])
 
+    if args.experiment:
+        logger.info("Using experiment: %s", args.experiment)
+
     # Predict
     run_predict(config.data_dir, holdings=holdings, top_k=args.top_k)
 
@@ -240,6 +250,7 @@ def _cmd_backtest(args, config):
         stop_loss_pct=args.stop_loss,
         top_k=args.top_k,
         model_dir=str(model_dir) if args.model_dir or model_dir.exists() else None,
+        experiment_name=args.experiment,
         rebalance_interval=args.rebalance_interval,
         sell_threshold=args.sell_threshold,
         daily_monitor=args.daily_monitor,
@@ -275,11 +286,56 @@ def _cmd_backtest(args, config):
     print(f"Report saved to: {output_path}")
 
 
+def _build_experiment_parser(subparsers):
+    parser = subparsers.add_parser("experiment", help="Manage experiments")
+    exp_sub = parser.add_subparsers(dest="exp_command")
+    exp_sub.add_parser("list", help="List all experiments")
+    show_parser = exp_sub.add_parser("show", help="Show experiment details")
+    show_parser.add_argument("name", help="Experiment name")
+    return parser
+
+
+def _cmd_experiment(args, config):
+    reg = ExperimentRegistry(config.data_dir)
+    if args.exp_command == "list":
+        experiments = reg.list_experiments()
+        if not experiments:
+            print("No experiments found.")
+            return
+        print(f"{'Name':<30} {'Mode':<15} {'Created':<20}")
+        print("-" * 65)
+        for exp in experiments:
+            print(f"{exp['name']:<30} {exp['mode']:<15} {exp['created']:<20}")
+    elif args.exp_command == "show":
+        found = reg.find(args.name)
+        if found is None:
+            print(f"Experiment '{args.name}' not found.")
+            return
+        print(f"Name:    {found['name']}")
+        print(f"Mode:    {found['mode']}")
+        print(f"Created: {found['created']}")
+        exp_dir = config.data_dir / "models" / "experiments" / args.name
+        if exp_dir.exists():
+            model_files = list(exp_dir.glob("*.txt"))
+            print(f"Models:  {len(model_files)} files")
+            results_path = exp_dir / "results.json"
+            if results_path.exists():
+                print(f"Results: {results_path}")
+
+
 def _build_model_parser(subparsers):
     model_parser = subparsers.add_parser("model", help="Train ML models")
     model_sub = model_parser.add_subparsers(dest="model_type")
 
     lgb_parser = model_sub.add_parser("lightgbm", help="LightGBM stock selection model")
+    lgb_parser.add_argument(
+        "variant",
+        choices=["regression", "quantile", "lambdarank", "meta"],
+        help="Model variant to train",
+    )
+    lgb_parser.add_argument(
+        "--name", required=True, help="Experiment name (e.g. exp_quantile_v2)"
+    )
     lgb_parser.add_argument(
         "--train-start", default="20240401", help="Train start YYYYMMDD"
     )
@@ -292,34 +348,16 @@ def _build_model_parser(subparsers):
     lgb_parser.add_argument(
         "--val-end", default="20260430", help="Validation end YYYYMMDD"
     )
-    lgb_parser.add_argument(
-        "--trials", type=int, default=50, help="Optuna trials (default: 50)"
-    )
+    lgb_parser.add_argument("--trials", type=int, default=50, help="Optuna trials")
     lgb_parser.add_argument("--no-tune", action="store_true", help="Skip Optuna tuning")
     lgb_parser.add_argument(
-        "--features",
-        default=None,
-        help="Comma-separated feature subset (default: all 158)",
+        "--features", default=None, help="Comma-separated feature subset"
     )
     lgb_parser.add_argument(
-        "--quantile",
-        action="store_true",
-        help="Train quantile regression models (10%/50%/90% instead of point estimates)",
+        "--meta-start", default=None, help="Meta model training start YYYYMMDD"
     )
     lgb_parser.add_argument(
-        "--meta-start",
-        default=None,
-        help="Meta model training start YYYYMMDD (e.g. 20220401)",
-    )
-    lgb_parser.add_argument(
-        "--meta-end",
-        default=None,
-        help="Meta model training end YYYYMMDD (e.g. 20230330)",
-    )
-    lgb_parser.add_argument(
-        "--lambdarank",
-        action="store_true",
-        help="Train with lambdarank objective (ranking, not regression)",
+        "--meta-end", default=None, help="Meta model training end YYYYMMDD"
     )
     return model_parser
 
@@ -330,7 +368,13 @@ def _cmd_model(args, config):
         if args.features:
             feature_names = [f.strip() for f in args.features.split(",") if f.strip()]
 
-        cfg = LightGBMConfig(
+        quantile_alphas = (
+            [0.1, 0.5, 0.9] if args.variant in ("quantile", "meta") else None
+        )
+
+        exp_cfg = ExpConfig(
+            name=args.name,
+            mode=args.variant,
             train_start=args.train_start,
             train_end=args.train_end,
             val_start=args.val_start,
@@ -338,16 +382,17 @@ def _cmd_model(args, config):
             n_trials=args.trials,
             tune=not args.no_tune,
             feature_names=feature_names,
-            quantile_alphas=[0.1, 0.5, 0.9] if args.quantile else None,
+            quantile_alphas=quantile_alphas,
             meta_start=args.meta_start,
             meta_end=args.meta_end,
-            lambdarank=args.lambdarank,
         )
-        pipeline = LightGBMPipeline(config.data_dir, cfg)
-        pipeline.run()
+        run_variant(config.data_dir, exp_cfg)
+        print(f"\nExperiment '{args.name}' completed successfully.")
+        print(
+            f"Models saved to: {config.data_dir / 'models' / 'experiments' / args.name}"
+        )
     else:
-        print(f"Unknown model type: {args.model_type}")
-        print("Available: lightgbm")
+        print(f"Unknown model type: {args.model_type}. Available: lightgbm")
 
 
 def _cmd_fetch(args, config, metadata):
@@ -391,6 +436,7 @@ def main():
     _build_backtest_parser(subparsers)
     _build_model_parser(subparsers)
     _build_predict_parser(subparsers)
+    _build_experiment_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -424,5 +470,7 @@ def main():
         _cmd_model(args, config)
     elif args.command == "predict":
         _cmd_predict(args, config)
+    elif args.command == "experiment":
+        _cmd_experiment(args, config)
     else:
         _cmd_fetch(args, config, metadata)
