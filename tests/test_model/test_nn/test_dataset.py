@@ -58,7 +58,9 @@ def test_build_sequences_shape():
     df = _make_synthetic_alpha360(n_stocks=2, n_days=100)
     params = _compute_norm_params(df)
     normed = _normalize(df, params)
-    X, Y = _build_sequences(normed, seq_length=20, n_bins=10, price_range=0.10)
+    X, Y = _build_sequences(
+        normed, seq_length=20, stride=10, n_bins=10, price_range=0.10
+    )
     assert X.ndim == 3
     assert X.shape[1] == 20
     assert X.shape[2] == 6

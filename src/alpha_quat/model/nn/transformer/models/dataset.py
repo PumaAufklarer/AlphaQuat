@@ -65,12 +65,12 @@ def _normalize(
 
 
 def _build_sequences(
-    df: pd.DataFrame, seq_length: int, n_bins: int, price_range: float
+    df: pd.DataFrame, seq_length: int, stride: int, n_bins: int, price_range: float
 ):
     """Build (X, y) sequences from per-stock data.
 
-    X: (60, 6) normalized features
-    y: (6, 100) probability distributions over bins
+    X: (seq_length, 6) normalized features
+    y: (6, n_bins) probability distributions over bins
     """
     features = []
     labels = []
@@ -80,7 +80,7 @@ def _build_sequences(
         vals = stock_df[_FEATURE_COLS].to_numpy(dtype=np.float32)
         sr_vals = stock_df[_SR_COLS].to_numpy(dtype=np.float32)
 
-        for i in range(len(stock_df) - seq_length):
+        for i in range(0, len(stock_df) - seq_length, stride):
             x = vals[i : i + seq_length]
             sr = sr_vals[i + seq_length - 1]  # SR labels at end of window
 
@@ -161,15 +161,23 @@ def build_datasets(
     train_norm = _normalize(train_df, norm_params)
     val_norm = _normalize(val_df, norm_params)
 
-    logger.info("Building train sequences...")
+    logger.info(
+        "Building train sequences (seq=%d, stride=%d)...",
+        config.seq_length,
+        config.stride,
+    )
     X_tr, Y_tr = _build_sequences(
-        train_norm, config.seq_length, config.n_bins, config.price_range
+        train_norm, config.seq_length, config.stride, config.n_bins, config.price_range
     )
     logger.info("Train: %d sequences", len(X_tr))
 
-    logger.info("Building val sequences...")
+    logger.info(
+        "Building val sequences (seq=%d, stride=%d)...",
+        config.seq_length,
+        config.stride,
+    )
     X_val, Y_val = _build_sequences(
-        val_norm, config.seq_length, config.n_bins, config.price_range
+        val_norm, config.seq_length, config.stride, config.n_bins, config.price_range
     )
     logger.info("Val: %d sequences", len(X_val))
 
