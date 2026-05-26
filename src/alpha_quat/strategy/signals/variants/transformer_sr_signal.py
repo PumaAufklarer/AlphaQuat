@@ -34,7 +34,11 @@ def _load_recent_alpha360(
     dates.reverse()
     if len(dates) < lookback:
         return pd.DataFrame()
-    chunks = [pd.read_parquet(cache_dir / f"{d}.parquet") for d in dates]
+    chunks = []
+    for d in dates:
+        df = pd.read_parquet(cache_dir / f"{d}.parquet")
+        df["trade_date"] = d
+        chunks.append(df)
     return pd.concat(chunks, ignore_index=True)
 
 

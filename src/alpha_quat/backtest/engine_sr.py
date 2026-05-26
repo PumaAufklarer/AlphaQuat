@@ -1,9 +1,11 @@
-"""SR backtest engine — price-triggered entry/exit with position sizing."""
+"""SR backtest engine — pre-loaded data, daily batch inference."""
 
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from alpha_quat.backtest.filters import build_universe
 from alpha_quat.backtest.metrics import compute_metrics
@@ -11,19 +13,74 @@ from alpha_quat.backtest.portfolio import Portfolio
 from alpha_quat.strategy.signals.variants.transformer_sr_signal import (
     TransformerSRSignal,
 )
-from alpha_quat.strategy.types import SignalResult, StrategyContext
+from alpha_quat.strategy.types import SignalResult
 
 logger = logging.getLogger(__name__)
 
-
-def _ymd_to_path(ymd: str) -> str:
-    return f"{ymd[:4]}_{ymd[4:6]}_{ymd[6:8]}"
+_FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
 
 
-# Position sizing constants
-MAX_POS_PCT = 0.25  # max 25% per stock
-MIN_CASH_PCT = 0.10  # min 10% cash reserve
+MAX_POS_PCT = 0.25
+MIN_CASH_PCT = 0.10
 MAX_HOLDINGS = 8
+
+
+def _load_cache_range(
+    data_dir: Path, start: str, end: str, lookback: int
+) -> pd.DataFrame:
+    """Load alpha360 cache for a date range, adding trade_date column."""
+    from datetime import datetime, timedelta
+
+    cache_dir = data_dir / "alpha360"
+    td = datetime.strptime(start, "%Y%m%d")
+    start_dt = td - timedelta(days=lookback * 2 + 10)
+
+    chunks = []
+    for f in sorted(cache_dir.glob("*.parquet")):
+        ds = f.stem
+        if ds >= start_dt.strftime("%Y%m%d") and ds <= end:
+            df = pd.read_parquet(f)
+            df["trade_date"] = ds
+            chunks.append(df)
+    return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame()
+
+
+def _build_daily_batch(
+    stock_data: dict,
+    stock_dates: dict,
+    inference,
+    trade_date: str,
+    universe: set,
+    seq_length: int,
+):
+    """Build (sequences, codes, close_prices) for all universe stocks on trade_date."""
+    sequences, codes, close_prices = [], [], []
+    for code in universe:
+        if code not in stock_data:
+            continue
+        arr = stock_data[code]
+        dates = stock_dates[code]
+        try:
+            day_idx = dates.index(trade_date)
+        except ValueError:
+            continue
+        if day_idx < seq_length - 1:
+            continue
+
+        seq = arr[day_idx - seq_length + 1 : day_idx + 1].copy()
+        if np.isnan(seq).any():
+            continue
+
+        close_last = seq[-1, 3]
+        if close_last <= 0:
+            continue
+
+        normed = inference._normalize(seq)
+        sequences.append(normed)
+        codes.append(code)
+        close_prices.append(close_last)
+
+    return np.stack(sequences) if sequences else None, codes, close_prices
 
 
 def run_sr_backtest(
@@ -35,13 +92,7 @@ def run_sr_backtest(
     commission_rate: float = 0.0005,
     stop_loss_pct: float = 0.15,
 ) -> dict:
-    cal_path = data_dir / "trade_cal.parquet"
-    if not cal_path.exists():
-        raise FileNotFoundError(
-            "trade_cal.parquet not found. Run 'alpha-quat fetch' first."
-        )
-
-    cal = pd.read_parquet(cal_path)
+    cal = pd.read_parquet(data_dir / "trade_cal.parquet")
     all_dates = sorted(cal.loc[cal["is_open"] == 1, "cal_date"].astype(str).tolist())
     dates = [d for d in all_dates if start_date <= d <= end_date]
     if not dates:
@@ -49,15 +100,33 @@ def run_sr_backtest(
 
     exp_dir = data_dir / "models" / "experiments" / experiment_name
     signal_gen = TransformerSRSignal(exp_dir, data_dir=data_dir)
-    portfolio = Portfolio(cash=initial_capital)
+    inference = signal_gen.inference
+    seq_length = inference.config.seq_length
 
+    # ── Pre-load all alpha360 data once ──
+    logger.info("Pre-loading alpha360 cache for %s ~ %s ...", start_date, end_date)
+    all_cache = _load_cache_range(data_dir, dates[0], dates[-1], seq_length)
+    logger.info("Loaded %d rows", len(all_cache))
+
+    # Build per-stock arrays (sorted by trade_date)
+    stock_data: dict[str, np.ndarray] = {}
+    stock_dates: dict[str, list[str]] = {}
+    for code, df in all_cache.groupby("ts_code"):
+        df = df.sort_values("trade_date")
+        stock_data[code] = df[_FEATURE_COLS].to_numpy(dtype=np.float32)
+        stock_dates[code] = df["trade_date"].tolist()
+    logger.info("Pre-loaded %d stocks", len(stock_data))
+
+    # ── Backtest loop ──
+    portfolio = Portfolio(cash=initial_capital)
     total_invested = initial_capital
     additions: dict[str, float] = {}
     tracked_months: set[str] = set()
     unfilled_signals: list[dict] = []
     pending_signals: SignalResult | None = None
 
-    for idx, td in enumerate(dates):
+    for idx, td in enumerate(tqdm(dates, desc="Backtesting")):
+        # Monthly addition
         month_key = td[:6]
         if month_key not in tracked_months:
             tracked_months.add(month_key)
@@ -66,7 +135,7 @@ def run_sr_backtest(
                 total_invested += 8000
                 additions[td] = additions.get(td, 0) + 8000
 
-        daily_path = data_dir / "daily" / f"{_ymd_to_path(td)}.parquet"
+        daily_path = data_dir / "daily" / f"{td[:4]}_{td[4:6]}_{td[6:8]}.parquet"
         if not daily_path.exists():
             continue
 
@@ -77,7 +146,7 @@ def run_sr_backtest(
         high_px = dict(zip(daily["ts_code"], daily["high"]))
         universe = build_universe(td, data_dir)
 
-        # --- Stop-loss check (close-triggered) ---
+        # Stop-loss
         portfolio.update_peak_prices(close_px)
         for code, h in list(portfolio.holdings.items()):
             cp = close_px.get(code)
@@ -91,13 +160,11 @@ def run_sr_backtest(
                         trade_date=td,
                         commission_rate=commission_rate,
                     )
-                    logger.debug("Stop-loss: sold %s at %.2f", code, px)
 
-        # --- Execute signals from T-1 (price-triggered) ---
+        # Execute pending signals (from T-1, price-triggered)
         if pending_signals is not None and not pending_signals.signals.empty:
             sigs = pending_signals.signals
 
-            # Execute sells first (free up cash for buys)
             sell_sigs = sigs[sigs["action"] == "sell"].sort_values(
                 "score", ascending=False
             )
@@ -106,10 +173,10 @@ def run_sr_backtest(
                 if code not in portfolio.holdings or code not in universe:
                     continue
                 target = row["target_price"]
-                todays_high = high_px.get(code)
-                if todays_high and target > 0 and todays_high >= target:
+                hh = high_px.get(code)
+                if hh and target > 0 and hh >= target:
                     h = portfolio.holdings[code]
-                    fill = min(target, max(target, todays_high * 0.98))
+                    fill = min(target, hh * 0.98)
                     portfolio.sell(
                         code,
                         price=fill,
@@ -117,10 +184,7 @@ def run_sr_backtest(
                         trade_date=td,
                         commission_rate=commission_rate,
                     )
-                    logger.debug(
-                        "Exit: sold %s at %.2f (target %.2f)", code, fill, target
-                    )
-                elif todays_high and target > 0 and todays_high < target:
+                else:
                     unfilled_signals.append(
                         {
                             "date": td,
@@ -131,7 +195,6 @@ def run_sr_backtest(
                         }
                     )
 
-            # Execute buys — sorted by score, allocate cash proportionally
             buy_sigs = sigs[sigs["action"] == "buy"].sort_values(
                 "score", ascending=False
             )
@@ -146,8 +209,8 @@ def run_sr_backtest(
                     if code in portfolio.holdings or code not in universe:
                         continue
                     target = row["target_price"]
-                    todays_low = low_px.get(code)
-                    if todays_low and target > 0 and todays_low <= target:
+                    ll = low_px.get(code)
+                    if ll and target > 0 and ll <= target:
                         score = row["score"]
                         alloc = (
                             available * score / total_score if total_score > 0 else 0
@@ -155,7 +218,7 @@ def run_sr_backtest(
                         alloc = min(
                             alloc, portfolio.total_value(close_px) * MAX_POS_PCT
                         )
-                        fill = max(target, todays_low * 1.002)
+                        fill = max(target, ll * 1.002)
                         portfolio.buy(
                             code,
                             price=fill,
@@ -163,10 +226,7 @@ def run_sr_backtest(
                             trade_date=td,
                             commission_rate=commission_rate,
                         )
-                        logger.debug(
-                            "Entry: bought %s at %.2f (target %.2f)", code, fill, target
-                        )
-                    elif todays_low and target > 0 and todays_low > target:
+                    else:
                         unfilled_signals.append(
                             {
                                 "date": td,
@@ -177,15 +237,59 @@ def run_sr_backtest(
                             }
                         )
 
-        # --- Generate signals for tomorrow ---
-        ctx = StrategyContext(
-            trade_date=td,
-            capital=portfolio.total_value(close_px),
-            universe=list(universe),
-            prices=daily[["ts_code", "open"]],
+        # Generate next day's signals
+        X_batch, codes, close_prices = _build_daily_batch(
+            stock_data, stock_dates, inference, td, universe, seq_length
         )
-        signal_result = signal_gen.generate(pd.DataFrame(), ctx)
-        pending_signals = signal_result
+        if X_batch is not None:
+            batch_results = inference.compute_entry_exit_batch(
+                X_batch, np.array(close_prices)
+            )
+            records = []
+            for code, sr, cl in zip(codes, batch_results, close_prices):
+                if sr["entry"]:
+                    ep = cl * (1 + sr["expected_down"])
+                    records.append(
+                        {
+                            "ts_code": code,
+                            "action": "buy",
+                            "score": min(
+                                sr["rr_ratio"] * sr["support_confidence"], 1.0
+                            ),
+                            "target_price": round(ep, 2),
+                            "stop_price": round(ep * 0.93, 2),
+                            "rr_ratio": round(sr["rr_ratio"], 2),
+                        }
+                    )
+                if sr["exit"]:
+                    ep = cl * (1 + sr["expected_up"])
+                    records.append(
+                        {
+                            "ts_code": code,
+                            "action": "sell",
+                            "score": round(sr["resistance_confidence"], 2),
+                            "target_price": round(ep, 2),
+                            "stop_price": 0,
+                            "rr_ratio": round(sr["rr_ratio"], 2),
+                        }
+                    )
+            pending_signals = SignalResult(
+                signals=pd.DataFrame(records)
+                if records
+                else pd.DataFrame(
+                    columns=[
+                        "ts_code",
+                        "action",
+                        "score",
+                        "target_price",
+                        "stop_price",
+                        "rr_ratio",
+                    ]
+                ),
+                metadata={"model": "transformer_sr", "trade_date": td},
+            )
+        else:
+            pending_signals = None
 
         portfolio.record_snapshot(td, close_px)
 
@@ -195,21 +299,14 @@ def run_sr_backtest(
         total_invested=total_invested,
         additions=additions,
     )
-
     logger.info(
-        "SR backtest complete: cum_ret=%.2f%% sharpe=%.2f mdd=%.2f%% trades=%d",
+        "Backtest complete: cum=%.2f%% sharpe=%.2f mdd=%.2f%% trades=%d unfilled=%d",
         metrics["cumulative_return"] * 100,
         metrics["sharpe_ratio"],
         metrics["max_drawdown"] * 100,
         metrics["total_trades"],
-    )
-    logger.info(
-        "Unfilled signals: %d (%d sell, %d buy)",
         len(unfilled_signals),
-        sum(1 for u in unfilled_signals if u["action"] == "sell"),
-        sum(1 for u in unfilled_signals if u["action"] == "buy"),
     )
-
     return {
         "snapshots": portfolio.snapshots,
         "trades": portfolio.trades,
