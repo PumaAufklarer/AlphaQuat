@@ -17,6 +17,7 @@ dependencies = [
     "ruff>=0.15.12",
     "scikit-learn>=1.5",
     "scipy>=1.14",
+    "torch>=2.0",
     "tushare>=1.4.29",
 ]
 

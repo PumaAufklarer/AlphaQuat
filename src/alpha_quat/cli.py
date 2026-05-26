@@ -323,6 +323,23 @@ def _cmd_experiment(args, config):
                 print(f"Results: {results_path}")
 
 
+def _build_sr_cache_parser(subparsers):
+    parser = subparsers.add_parser(
+        "sr-cache", help="Pre-compute Alpha360 + support/resistance labels"
+    )
+    return parser
+
+
+def _cmd_sr_cache(args, config):
+    from alpha_quat.data.sr_cache import build_cache
+
+    written = build_cache(config.data_dir)
+    print(
+        f"Alpha360 cache: {written} date files written to "
+        f"{config.data_dir / 'alpha360'}"
+    )
+
+
 def _build_model_parser(subparsers):
     model_parser = subparsers.add_parser("model", help="Train ML models")
     model_sub = model_parser.add_subparsers(dest="model_type")
@@ -353,6 +370,25 @@ def _build_model_parser(subparsers):
     lgb_parser.add_argument(
         "--features", default=None, help="Comma-separated feature subset"
     )
+    return_parser = lgb_parser  # noqa
+
+    nn_parser = model_sub.add_parser("nn", help="Neural network models")
+    nn_parser.add_argument(
+        "nn_type",
+        choices=["sr_transformer"],
+        help="NN variant to train",
+    )
+    nn_parser.add_argument("--name", required=True, help="Experiment name")
+    nn_parser.add_argument(
+        "--train-start", default="20200101", help="Train start YYYYMMDD"
+    )
+    nn_parser.add_argument("--train-end", default="20231231", help="Train end YYYYMMDD")
+    nn_parser.add_argument(
+        "--val-start", default="20240101", help="Validation start YYYYMMDD"
+    )
+    nn_parser.add_argument(
+        "--val-end", default="20240630", help="Validation end YYYYMMDD"
+    )
 
     return model_parser
 
@@ -382,8 +418,24 @@ def _cmd_model(args, config):
         print(
             f"Models saved to: {config.data_dir / 'models' / 'experiments' / args.name}"
         )
+    elif args.model_type == "nn":
+        exp_cfg = ExpConfig(
+            name=args.name,
+            mode=args.nn_type,
+            train_start=args.train_start,
+            train_end=args.train_end,
+            val_start=args.val_start,
+            val_end=args.val_end,
+        )
+        from alpha_quat.model.nn.pipeline import run_variant_nn
+
+        run_variant_nn(config.data_dir, exp_cfg)
+        print(f"\nNN Experiment '{args.name}' completed successfully.")
+        print(
+            f"Models saved to: {config.data_dir / 'models' / 'experiments' / args.name}"
+        )
     else:
-        print(f"Unknown model type: {args.model_type}. Available: lightgbm")
+        print(f"Unknown model type: {args.model_type}. Available: lightgbm, nn")
 
 
 def _cmd_fetch(args, config, metadata):
@@ -428,6 +480,7 @@ def main():
     _build_model_parser(subparsers)
     _build_predict_parser(subparsers)
     _build_experiment_parser(subparsers)
+    _build_sr_cache_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -463,5 +516,7 @@ def main():
         _cmd_predict(args, config)
     elif args.command == "experiment":
         _cmd_experiment(args, config)
+    elif args.command == "sr-cache":
+        _cmd_sr_cache(args, config)
     else:
         _cmd_fetch(args, config, metadata)
