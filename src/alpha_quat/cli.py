@@ -323,6 +323,41 @@ def _cmd_experiment(args, config):
                 print(f"Results: {results_path}")
 
 
+def _build_backtest_sr_parser(subparsers):
+    parser = subparsers.add_parser("backtest-sr", help="Run SR Transformer backtest")
+    parser.add_argument("--experiment", required=True, help="Experiment name")
+    parser.add_argument("--start", default="20220101", help="Start date YYYYMMDD")
+    parser.add_argument("--end", default="20241231", help="End date YYYYMMDD")
+    parser.add_argument("--capital", type=float, default=50000, help="Initial capital")
+    parser.add_argument("--stop-loss", type=float, default=0.15, help="Stop loss pct")
+    return parser
+
+
+def _cmd_backtest_sr(args, config):
+    from alpha_quat.backtest.engine_sr import run_sr_backtest
+
+    result = run_sr_backtest(
+        data_dir=config.data_dir,
+        experiment_name=args.experiment,
+        start_date=args.start,
+        end_date=args.end,
+        initial_capital=args.capital,
+        stop_loss_pct=args.stop_loss,
+    )
+    m = result["metrics"]
+    print("=" * 50)
+    print("  SR BACKTEST RESULTS")
+    print("=" * 50)
+    print(f"  Period:          {args.start} ~ {args.end}")
+    print(f"  Total Invested:  {m['total_invested']:,.0f}")
+    print(f"  Final Value:     {m['final_value']:,.2f}")
+    print(f"  Cumulative Ret:  {m['cumulative_return'] * 100:+.2f}%")
+    print(f"  Annualized Ret:  {m['annualized_return'] * 100:+.2f}%")
+    print(f"  Max Drawdown:    {m['max_drawdown'] * 100:.2f}%")
+    print(f"  Sharpe Ratio:    {m['sharpe_ratio']:.2f}")
+    print(f"  Total Trades:    {m['total_trades']}")
+
+
 def _build_sr_cache_parser(subparsers):
     parser = subparsers.add_parser(
         "sr-cache", help="Pre-compute Alpha360 + support/resistance labels"
@@ -489,6 +524,7 @@ def main():
     _build_predict_parser(subparsers)
     _build_experiment_parser(subparsers)
     _build_sr_cache_parser(subparsers)
+    _build_backtest_sr_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -526,5 +562,7 @@ def main():
         _cmd_experiment(args, config)
     elif args.command == "sr-cache":
         _cmd_sr_cache(args, config)
+    elif args.command == "backtest-sr":
+        _cmd_backtest_sr(args, config)
     else:
         _cmd_fetch(args, config, metadata)

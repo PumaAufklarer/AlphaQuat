@@ -34,12 +34,7 @@ class BacktestEngine:
             exp_cfg = ExpCfg.load(exp_dir / "experiment.yaml")
             if exp_cfg.mode not in SigVARIANTS:
                 raise ValueError(f"Unknown signal mode: {exp_cfg.mode}")
-            signal_cls = SigVARIANTS[exp_cfg.mode]
-            self._sr_mode = signal_cls.mode == "transformer_sr"
-            if self._sr_mode:
-                self.signal_gen = signal_cls(exp_dir, data_dir=data_dir)
-            else:
-                self.signal_gen = signal_cls(exp_dir)
+            self.signal_gen = SigVARIANTS[exp_cfg.mode](exp_dir)
         elif config.model_dir:
             self.signal_gen = MLSignalGenerator(
                 Path(config.model_dir), top_k=config.top_k
@@ -49,7 +44,6 @@ class BacktestEngine:
                 short_factor=config.short_factor, long_factor=config.long_factor
             )
 
-        self._sr_mode = False
         self.position_mgr = EqualWeightTopKPosition(top_k=config.top_k)
         self._pending_signals = None
         self._total_invested = config.initial_capital
@@ -140,29 +134,35 @@ class BacktestEngine:
                     prices=prices_df,
                 )
 
-                if self._sr_mode:
-                    # SR mode: direct entry/exit, no top-K
-                    for _, row in sig_df.iterrows():
+                buy_sigs = sig_df.loc[sig_df["action"] == "buy"]
+                if not buy_sigs.empty:
+                    fake_result = SignalResult(
+                        signals=buy_sigs.reset_index(drop=True),
+                        metadata=self._pending_signals.metadata,
+                    )
+                    alloc = self.position_mgr.allocate(fake_result, ctx)
+                    alloc = self.position_mgr.constrain(alloc, ctx)
+                    for _, row in alloc.iterrows():
                         code = row["ts_code"]
                         px = open_px.get(code)
-                        if px is None or px <= 0:
-                            continue
-                        if (
-                            row["action"] == "buy"
-                            and code not in self.portfolio.holdings
-                        ):
+                        if px and px > 0:
+                            target_amt = row["target_weight"] * ctx.capital
                             self.portfolio.buy(
                                 ts_code=code,
                                 price=px,
-                                target_amount=ctx.capital * 0.95,
+                                target_amount=target_amt,
                                 trade_date=td,
                                 commission_rate=self.config.commission_rate,
                                 min_commission=self.config.min_commission,
                             )
-                        elif (
-                            row["action"] == "sell" and code in self.portfolio.holdings
-                        ):
-                            h = self.portfolio.holdings[code]
+
+                sell_sigs = sig_df.loc[sig_df["action"] == "sell"]
+                for _, row in sell_sigs.iterrows():
+                    code = row["ts_code"]
+                    if code in self.portfolio.holdings:
+                        h = self.portfolio.holdings[code]
+                        px = open_px.get(code)
+                        if px and px > 0:
                             self.portfolio.sell(
                                 ts_code=code,
                                 price=px,
@@ -171,59 +171,17 @@ class BacktestEngine:
                                 commission_rate=self.config.commission_rate,
                                 min_commission=self.config.min_commission,
                             )
-                else:
-                    buy_sigs = sig_df.loc[sig_df["action"] == "buy"]
-                    if not buy_sigs.empty:
-                        fake_result = SignalResult(
-                            signals=buy_sigs.reset_index(drop=True),
-                            metadata=self._pending_signals.metadata,
-                        )
-                        alloc = self.position_mgr.allocate(fake_result, ctx)
-                        alloc = self.position_mgr.constrain(alloc, ctx)
-                        for _, row in alloc.iterrows():
-                            code = row["ts_code"]
-                            px = open_px.get(code)
-                            if px and px > 0:
-                                target_amt = row["target_weight"] * ctx.capital
-                                self.portfolio.buy(
-                                    ts_code=code,
-                                    price=px,
-                                    target_amount=target_amt,
-                                    trade_date=td,
-                                    commission_rate=self.config.commission_rate,
-                                    min_commission=self.config.min_commission,
-                                )
 
-                    sell_sigs = sig_df.loc[sig_df["action"] == "sell"]
-                    for _, row in sell_sigs.iterrows():
-                        code = row["ts_code"]
-                        if code in self.portfolio.holdings:
-                            h = self.portfolio.holdings[code]
-                            px = open_px.get(code)
-                            if px and px > 0:
-                                self.portfolio.sell(
-                                    ts_code=code,
-                                    price=px,
-                                    shares=h.shares,
-                                    trade_date=td,
-                                    commission_rate=self.config.commission_rate,
-                                    min_commission=self.config.min_commission,
-                                )
+            feat_path = self.data_dir / "features" / f"{td}.parquet"
+            if not feat_path.exists():
+                self._pending_signals = None
+                self.portfolio.record_snapshot(td, close_px)
+                continue
 
-            if self._sr_mode:
-                features = pd.DataFrame()
-            else:
-                feat_path = self.data_dir / "features" / f"{td}.parquet"
-                if not feat_path.exists():
-                    self._pending_signals = None
-                    self.portfolio.record_snapshot(td, close_px)
-                    continue
-                features = pd.read_parquet(feat_path)
-                features = features.loc[features["ts_code"].isin(list(universe))]
+            features = pd.read_parquet(feat_path)
+            features = features.loc[features["ts_code"].isin(list(universe))]
 
-            if self._sr_mode:
-                pass  # signals already set above
-            elif self.config.model_dir or self.config.experiment_name:
+            if self.config.model_dir or self.config.experiment_name:
                 if self.config.daily_monitor:
                     ctx_sig = StrategyContext(
                         trade_date=td, capital=self.portfolio.total_value(close_px)
