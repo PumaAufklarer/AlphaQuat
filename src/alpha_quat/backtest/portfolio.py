@@ -10,6 +10,7 @@ class Holding:
     avg_cost: float
     buy_date: str
     peak_price: float = 0.0
+    stop_price: float = 0.0
 
 
 class Portfolio:
@@ -27,6 +28,7 @@ class Portfolio:
         trade_date,
         commission_rate,
         min_commission=0.0,
+        stop_price=0.0,
     ):
         if price <= 0:
             return 0
@@ -49,12 +51,14 @@ class Portfolio:
             old = self.holdings[ts_code]
             total_shares = old.shares + lots
             new_avg = (old.avg_cost * old.shares + price * lots) / total_shares
+            old_stop = old.stop_price if old.stop_price > 0 else stop_price
             self.holdings[ts_code] = Holding(
                 ts_code=ts_code,
                 shares=total_shares,
                 avg_cost=new_avg,
                 buy_date=trade_date,
                 peak_price=max(old.peak_price, price),
+                stop_price=old_stop,
             )
         else:
             self.holdings[ts_code] = Holding(
@@ -63,6 +67,7 @@ class Portfolio:
                 avg_cost=price,
                 buy_date=trade_date,
                 peak_price=price,
+                stop_price=stop_price,
             )
         self.trades.append(
             {

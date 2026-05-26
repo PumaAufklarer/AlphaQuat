@@ -146,11 +146,14 @@ def run_sr_backtest(
         high_px = dict(zip(daily["ts_code"], daily["high"]))
         universe = build_universe(td, data_dir)
 
-        # Stop-loss
+        # Stop-loss: trailing stop + support-level stop
         portfolio.update_peak_prices(close_px)
         for code, h in list(portfolio.holdings.items()):
             cp = close_px.get(code)
-            if cp and cp < h.peak_price * (1 - stop_loss_pct):
+            should_sell = (cp and cp < h.peak_price * (1 - stop_loss_pct)) or (
+                cp and h.stop_price > 0 and cp < h.stop_price
+            )
+            if should_sell:
                 px = open_px.get(code)
                 if px and px > 0 and code in universe:
                     portfolio.sell(
@@ -219,12 +222,14 @@ def run_sr_backtest(
                             alloc, portfolio.total_value(close_px) * MAX_POS_PCT
                         )
                         fill = max(target, ll * 1.002)
+                        stop = row.get("stop_price", fill * 0.93)
                         portfolio.buy(
                             code,
                             price=fill,
                             target_amount=alloc,
                             trade_date=td,
                             commission_rate=commission_rate,
+                            stop_price=stop,
                         )
                     else:
                         unfilled_signals.append(
