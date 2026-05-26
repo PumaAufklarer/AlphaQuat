@@ -1,4 +1,5 @@
 import logging
+from math import cos, pi
 from pathlib import Path
 
 import torch
@@ -17,15 +18,19 @@ _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def masked_cross_entropy(
     logits: torch.Tensor,  # (B, 6, n_bins)
-    target: torch.Tensor,  # (B, 6, n_bins)
+    target: torch.Tensor,  # (B, 6) long — class indices
     mask: torch.Tensor,  # (B, 6) bool
+    label_smoothing: float = 0.1,
 ) -> torch.Tensor:
-    """Cross-entropy masked to only valid horizons."""
     B, H, C = logits.shape
-    loss = F.cross_entropy(logits.view(-1, C), target.view(-1, C), reduction="none")
+    loss = F.cross_entropy(
+        logits.view(-1, C),
+        target.view(-1),
+        reduction="none",
+        label_smoothing=label_smoothing,
+    )
     loss = loss.view(B, H) * mask
-    valid_count = mask.sum()
-    return loss.sum() / valid_count.clamp(min=1)
+    return loss.sum() / mask.sum().clamp(min=1)
 
 
 def _validate(model, val_loader):
@@ -42,6 +47,25 @@ def _validate(model, val_loader):
     return total_loss / max(count, 1)
 
 
+class _WarmupCosineScheduler:
+    def __init__(self, optimizer, warmup_steps: int, total_steps: int):
+        self.optimizer = optimizer
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.base_lrs = [g["lr"] for g in optimizer.param_groups]
+
+    def step(self, step: int):
+        if step < self.warmup_steps:
+            factor = step / max(self.warmup_steps, 1)
+        else:
+            progress = (step - self.warmup_steps) / max(
+                self.total_steps - self.warmup_steps, 1
+            )
+            factor = 0.5 * (1 + cos(pi * min(progress, 1)))
+        for g, base_lr in zip(self.optimizer.param_groups, self.base_lrs):
+            g["lr"] = base_lr * factor
+
+
 def train(
     model: StockTransformer,
     train_dataset: SRSequenceDataset,
@@ -53,13 +77,17 @@ def train(
     optimizer = optim.AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
 
     train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
 
+    total_steps = len(train_loader) * config.epochs
+    warmup_steps = int(total_steps * 0.05)
+    scheduler = _WarmupCosineScheduler(optimizer, warmup_steps, total_steps)
+
     best_val_loss = float("inf")
     patience_counter = 0
+    global_step = 0
 
     for epoch in range(config.epochs):
         model.train()
@@ -70,21 +98,24 @@ def train(
             x, y, m = x.to(_DEVICE), y.to(_DEVICE), m.to(_DEVICE)
             optimizer.zero_grad()
             logits = model(x)
-            loss = masked_cross_entropy(logits, y, m)
+            loss = masked_cross_entropy(logits, y, m, label_smoothing=0.1)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            scheduler.step(global_step)
+            global_step += 1
             train_loss += loss.item()
             train_count += 1
 
-        scheduler.step()
         val_loss = _validate(model, val_loader)
 
         logger.info(
-            "Epoch %2d/%d: train_loss=%.4f val_loss=%.4f",
+            "Epoch %2d/%d: train_loss=%.4f val_loss=%.4f lr=%.2e",
             epoch + 1,
             config.epochs,
             train_loss / max(train_count, 1),
             val_loss,
+            optimizer.param_groups[0]["lr"],
         )
 
         if val_loss < best_val_loss:

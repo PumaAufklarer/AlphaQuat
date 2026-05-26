@@ -70,7 +70,7 @@ def _build_sequences(
     """Build (X, y, mask) sequences from per-stock data.
 
     X: (seq_length, 6) normalized features
-    y: (6, n_bins) probability distributions (placeholders for invalid)
+    y: (6,) int64 — class index (correct bin) per horizon, 0 for invalid
     mask: (6,) bool — True where SR label was valid
     """
     features = []
@@ -92,21 +92,16 @@ def _build_sequences(
             if np.isnan(sr).all():
                 continue
 
-            mask = ~np.isnan(sr)  # (6,) bool
+            mask = ~np.isnan(sr)
 
-            y = np.zeros((6, n_bins), dtype=np.float32)
+            y = np.zeros(6, dtype=np.int64)
             for j in range(6):
                 if mask[j]:
                     close_last = vals[i + seq_length - 1, 3]
                     ratio = (sr[j] - close_last) / close_last
                     bin_idx = int((ratio / price_range + 1) * n_bins / 2)
                     bin_idx = max(0, min(n_bins - 1, bin_idx))
-                    sigma = 2
-                    for k in range(n_bins):
-                        y[j, k] = np.exp(-((k - bin_idx) ** 2) / (2 * sigma**2))
-                    y_sum = y[j].sum()
-                    if y_sum > 0:
-                        y[j] /= y_sum
+                    y[j] = bin_idx
 
             features.append(x)
             labels.append(y)
@@ -124,7 +119,7 @@ def _build_sequences(
 class SRSequenceDataset(Dataset):
     def __init__(self, X: np.ndarray, Y: np.ndarray, mask: np.ndarray):
         self.X = torch.from_numpy(X).float()
-        self.Y = torch.from_numpy(Y).float()
+        self.Y = torch.from_numpy(Y).long()
         self.mask = torch.from_numpy(mask).bool()
 
     def __len__(self):

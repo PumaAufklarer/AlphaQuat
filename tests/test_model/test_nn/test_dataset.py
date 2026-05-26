@@ -64,12 +64,13 @@ def test_build_sequences_shape():
     assert X.ndim == 3
     assert X.shape[1] == 20
     assert X.shape[2] == 6
+    assert Y.ndim == 2
     assert Y.shape[1] == 6
-    assert Y.shape[2] == 10
+    assert Y.dtype == np.int64
     assert M.shape == (Y.shape[0], 6)
     assert M.dtype == bool
     assert np.isfinite(X).all()
     for i in range(Y.shape[0]):
         for j in range(6):
             if M[i, j]:
-                assert abs(Y[i, j].sum() - 1.0) < 0.01
+                assert 0 <= Y[i, j] < 10

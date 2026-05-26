@@ -29,7 +29,6 @@ def evaluate(
     dataset: SRSequenceDataset,
     config: TransformerConfig,
 ) -> dict:
-    """Evaluate model on dataset, return metrics per horizon."""
     model.eval()
     loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
@@ -54,7 +53,7 @@ def evaluate(
             )
             horizon_losses[h_name].extend(per_sample[h_mask].cpu().numpy().tolist())
 
-            true_bin = y[:, h_idx].argmax(dim=1)
+            true_bin = y[:, h_idx]
             _, top3 = probs[:, h_idx].topk(3, dim=1)
             top3_hit = (top3 == true_bin.unsqueeze(1)).any(dim=1).float()
             horizon_top3[h_name].extend(top3_hit[h_mask].cpu().numpy().tolist())
