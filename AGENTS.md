@@ -158,6 +158,10 @@ uv run alpha-quat model nn keltner --name exp_keltner_v1
 # RL Agent (experimental — does not learn effectively)
 uv run alpha-quat model nn rl_agent --name exp_agent_v5
 
+# Rank Scorer (experimental — Spearman ~0)
+uv run alpha-quat build-rank-cache                                         # pre-compute sequence cache
+uv run alpha-quat model nn rank_scorer --name exp_ar_v5                    # train pairwise rank model
+
 # Backtest
 uv run alpha-quat backtest --experiment exp_quantile_v1               # LightGBM ranking bt
 uv run alpha-quat backtest-sr --experiment exp_sr_v1 --start 20240101 # SR entry/exit bt
@@ -203,6 +207,29 @@ data/
 - **`stride` default = 10** — stride=30 was too aggressive, not enough near-term samples.
 - **per-sequence normalization** — divide by last close, not global z-score. This removed stock-specific shortcuts.
 - **batch inference** — `SRInference.predict_batch()` runs one forward pass for all stocks, not per-stock loops.
+
+### Rank Scorer Transformer (`model/nn/alpha_rank/`)
+
+Cross-sectional pairwise ranking model: Transformer → score per stock, trained with margin ranking loss.
+
+| Module | Purpose |
+|--------|---------|
+| `build_cache.py` | Flat parquet (alpha360 + alpha158 + daily_basic) → numpy sequence cache |
+| `model.py` | `RankScoreTransformer` — 60-day encoder + scoring head |
+| `train.py` | Pairwise ranking loss, per-date batching, Spearman eval |
+| `quality_filter.py` | Industry-relative PE/PB quality filter (look-back-free) |
+
+**Experiments:**
+
+| Experiment | Features | Seq | Universe | Loss↓ | Spearman |
+|-----------|----------|-----|----------|-------|----------|
+| exp_ar_v1 | 42 feat (A360+A158) | 20d | All 主板 | 4.60→4.60 | ~0 |
+| exp_ar_v2 | 10-bin soft CE + edge compensation | 20d | All 主板 | 6.85→6.65 | top1=13% |
+| exp_ar_v3 | 74 feat pairwise rank | 60d | All 主板 | 0.48→0.42 | 0.01 |
+| exp_ar_v4 | 74 feat + quality filter | 60d | Quality pool | 0.48→0.42 | 0.01 |
+| exp_ar_v5 | 21 feat (A360 raw + temporal + industry) | 60d | Quality pool | 0.48→0.46 | ~0 |
+
+**Root cause:** Transformer cannot learn cross-sectional stock ranking from OHLCV sequences alone. The loss decreases by exploiting correlated features (temporal features, date co-linearity) without learning actual ranking. LightGBM succeeds because its 158+ Alpha158 features include cross-sectional rank/quantile statistics, which are the actual signal source.
 
 ### RL / Neural models
 - **14 OHLCV features insufficient** — RL agents and ranking models fail to learn from 14 features alone.

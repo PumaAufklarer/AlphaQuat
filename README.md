@@ -106,11 +106,12 @@ src/alpha_quat/
 ├── features/           # Factor computation engine (DuckDB)
 │   └── alphasets/      # Factor set definitions (alpha158/ext/fund)
 ├── model/              # ML model (dataset, train, evaluate, meta, predict, rolling)
-│   ├── lightgbm/       # LightGBM — regression, quantile, lambdarank
-│   └── nn/             # Neural networks (experimental)
+│   ├── lightgbm/       # LightGBM — regression, quantile, lambdarank (production)
+│   └── nn/             # Neural networks (all experimental — none effective)
 │       ├── transformer/    # StockTransformer — SR price prediction
 │       ├── keltner/        # Keltner Channel regime prediction
-│       └── rl_agent/       # REINFORCE position control agent
+│       ├── rl_agent/       # REINFORCE position control agent
+│       └── alpha_rank/     # Cross-sectional ranking transformer
 ├── strategy/           # Signal generators + position managers
 └── backtest/           # Backtesting engine + metrics + report
 ```

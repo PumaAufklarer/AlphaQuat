@@ -375,6 +375,28 @@ def _cmd_sr_cache(args, config):
     )
 
 
+def _build_rank_cache_parser(subparsers):
+    parser = subparsers.add_parser(
+        "build-rank-cache",
+        help="Build percentile rank dataset (alpha360+a158→X.npy/Y.npy)",
+    )
+    parser.add_argument("--train-start", default="20200101")
+    parser.add_argument("--train-end", default="20231231")
+    parser.add_argument("--val-start", default="20240101")
+    parser.add_argument("--val-end", default="20240630")
+    parser.add_argument("--out-dir", default="data/rank_cache")
+    return parser
+
+
+def _cmd_build_rank_cache(args, config):
+    from alpha_quat.model.nn.alpha_rank.build_cache import build
+
+    out = Path(args.out_dir)
+    build(config.data_dir, out / "train", args.train_start, args.train_end)
+    build(config.data_dir, out / "val", args.val_start, args.val_end)
+    print(f"Rank cache built in {out}")
+
+
 def _build_model_parser(subparsers):
     model_parser = subparsers.add_parser("model", help="Train ML models")
     model_sub = model_parser.add_subparsers(dest="model_type")
@@ -410,7 +432,7 @@ def _build_model_parser(subparsers):
     nn_parser = model_sub.add_parser("nn", help="Neural network models")
     nn_parser.add_argument(
         "nn_type",
-        choices=["sr_transformer", "keltner", "rl_agent"],
+        choices=["sr_transformer", "keltner", "rl_agent", "rank_scorer"],
         help="NN variant to train",
     )
     nn_parser.add_argument("--name", required=True, help="Experiment name")
@@ -457,22 +479,36 @@ def _cmd_model(args, config):
             f"Models saved to: {config.data_dir / 'models' / 'experiments' / args.name}"
         )
     elif args.model_type == "nn":
-        exp_cfg = ExpConfig(
-            name=args.name,
-            mode=args.nn_type,
-            train_start=args.train_start,
-            train_end=args.train_end,
-            val_start=args.val_start,
-            val_end=args.val_end,
-        )
-        if args.tune:
-            from alpha_quat.model.nn.tune import grid_search
+        if args.nn_type == "rank_scorer":
+            from alpha_quat.model.nn.alpha_rank.train import train
 
-            grid_search(config.data_dir, exp_cfg)
+            exp_dir = config.data_dir / "models" / "experiments" / args.name
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            train(
+                config.data_dir,
+                exp_dir,
+                train_start=args.train_start,
+                train_end=args.train_end,
+                val_start=args.val_start,
+                val_end=args.val_end,
+            )
         else:
-            from alpha_quat.model.nn.pipeline import run_variant_nn
+            exp_cfg = ExpConfig(
+                name=args.name,
+                mode=args.nn_type,
+                train_start=args.train_start,
+                train_end=args.train_end,
+                val_start=args.val_start,
+                val_end=args.val_end,
+            )
+            if args.tune:
+                from alpha_quat.model.nn.tune import grid_search
 
-            run_variant_nn(config.data_dir, exp_cfg)
+                grid_search(config.data_dir, exp_cfg)
+            else:
+                from alpha_quat.model.nn.pipeline import run_variant_nn
+
+                run_variant_nn(config.data_dir, exp_cfg)
         print(f"\nNN Experiment '{args.name}' completed successfully.")
         print(
             f"Models saved to: {config.data_dir / 'models' / 'experiments' / args.name}"
@@ -524,6 +560,7 @@ def main():
     _build_predict_parser(subparsers)
     _build_experiment_parser(subparsers)
     _build_sr_cache_parser(subparsers)
+    _build_rank_cache_parser(subparsers)
     _build_backtest_sr_parser(subparsers)
 
     args = parser.parse_args()
@@ -562,6 +599,8 @@ def main():
         _cmd_experiment(args, config)
     elif args.command == "sr-cache":
         _cmd_sr_cache(args, config)
+    elif args.command == "build-rank-cache":
+        _cmd_build_rank_cache(args, config)
     elif args.command == "backtest-sr":
         _cmd_backtest_sr(args, config)
     else:
