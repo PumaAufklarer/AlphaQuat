@@ -11,7 +11,22 @@ from alpha_quat.model.nn.transformer.models.transformer import StockTransformer
 logger = logging.getLogger(__name__)
 
 _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-_FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
+_FEATURE_COLS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "volume_ratio",
+    "turnover_rate",
+    "hl_ratio",
+    "ret_5d",
+    "close_ma20",
+    "atr_ratio",
+    "vol_change",
+    "amt_change",
+]
 
 
 class SRInference:
@@ -43,7 +58,7 @@ class SRInference:
         self.model.eval()
 
     def _normalize(self, x: np.ndarray) -> np.ndarray:
-        """Per-sequence normalization: price ratios + log volume."""
+        """Per-sequence normalization: price ratios + log vol + per-seq z-score."""
         out = x.copy().astype(np.float32)
         close_last = out[-1, 3]
         if close_last <= 0:
@@ -55,10 +70,21 @@ class SRInference:
         out[:, 3] = out[:, 3] / close_last - 1
         out[:, 5] = out[:, 5] / close_last - 1
         out[:, 4] = (np.log1p(out[:, 4]) - self._log_vol_mean) / self._log_vol_std
+
+        for j in range(6, x.shape[1]):
+            col = out[:, j]
+            mean = col.mean()
+            std = col.std()
+            if std > 1e-8:
+                out[:, j] = (col - mean) / std
+            else:
+                out[:, j] = 0.0
+            out[:, j] = np.clip(out[:, j], -5.0, 5.0)
+
         return out
 
     def predict(self, sequence: np.ndarray) -> dict[str, np.ndarray]:
-        """Predict SR distributions for a (60, 6) sequence."""
+        """Predict SR distributions for a (60, n_features) sequence."""
         seq = self._normalize(sequence)
 
         x = torch.from_numpy(seq).unsqueeze(0).to(_DEVICE)
@@ -77,7 +103,7 @@ class SRInference:
         return {name: probs[i] for i, name in enumerate(names)}
 
     def predict_batch(self, sequences: np.ndarray) -> np.ndarray:
-        """Batch inference: (B, 60, 6) → (B, 6, 100) probabilities."""
+        """Batch inference: (B, 60, n_features) → (B, 6, n_bins) probabilities."""
         tensor = torch.from_numpy(sequences).float().to(_DEVICE)
         with torch.no_grad():
             logits = self.model(tensor)
@@ -86,74 +112,96 @@ class SRInference:
     def compute_entry_exit_batch(
         self, sequences: np.ndarray, close_prices: np.ndarray
     ) -> list[dict]:
-        """Batch entry/exit: (B, 60, 6) → list of per-stock signal dicts."""
+        """Batch entry/exit: (B, 60, n_features) → list of per-stock signal dicts.
+
+        Bin 0..n_bins-2 = price ratios, bin n_bins-1 = "no peak".
+        Expected values computed only from price bins (excl. no-peak bin).
+        """
         probs = self.predict_batch(sequences)
         n_bins = self.config.n_bins
+        n_price_bins = n_bins - 1
         price_range = self.config.price_range
-        bin_centers = np.linspace(-price_range, price_range, n_bins)
+        bin_centers = np.linspace(-price_range, price_range, n_price_bins)
 
         results = []
         for i in range(probs.shape[0]):
             p = probs[i]
-            expected_up = float((p[0] * bin_centers).sum())  # resistance_5d at idx 0
-            expected_down = float(-(p[3] * bin_centers).sum())  # support_5d at idx 3
-            rr_ratio = expected_up / max(expected_down, 1e-6)
 
-            near_sup = (bin_centers > -expected_down - 0.01) & (
-                bin_centers < -expected_down + 0.01
-            )
-            support_confidence = float(p[3][near_sup].sum())
-            near_res = (bin_centers > expected_up - 0.01) & (
-                bin_centers < expected_up + 0.01
-            )
-            resistance_confidence = float(p[0][near_res].sum())
+            def _expected(head_idx: int) -> tuple[float, float, float]:
+                h = p[head_idx]
+                price_probs = h[:n_price_bins]
+                no_peak_prob = float(h[n_price_bins])
+                price_sum = price_probs.sum()
+                if price_sum > 1e-6:
+                    p_norm = price_probs / price_sum
+                    exp = float((p_norm * bin_centers).sum())
+                else:
+                    p_norm = price_probs
+                    exp = 0.0
+                near = (bin_centers > exp - 0.01) & (bin_centers < exp + 0.01)
+                conf = float(price_probs[near].sum() / max(price_sum, 1e-6))
+                return exp, conf, no_peak_prob
+
+            exp_up, res_conf, _ = _expected(0)
+            exp_down_raw, sup_conf, _ = _expected(3)
+            expected_down = -exp_down_raw
+            rr_ratio = abs(exp_up) / max(abs(expected_down), 1e-6)
 
             results.append(
                 {
-                    "entry": rr_ratio > 2.0 and support_confidence > 0.1,
-                    "exit": resistance_confidence > 0.3,
+                    "entry": rr_ratio > 2.0 and sup_conf > 0.1,
+                    "exit": res_conf > 0.3,
                     "rr_ratio": rr_ratio,
-                    "expected_up": expected_up,
-                    "expected_down": -expected_down,
-                    "support_confidence": support_confidence,
-                    "resistance_confidence": resistance_confidence,
+                    "expected_up": exp_up,
+                    "expected_down": expected_down,
+                    "support_confidence": sup_conf,
+                    "resistance_confidence": res_conf,
                 }
             )
         return results
 
     def compute_entry_exit(self, sequence: np.ndarray, close_price: float) -> dict:
-        """Compute entry/exit signals from SR predictions."""
+        """Compute entry/exit signals from SR predictions.
+
+        Bin 0..n_bins-2 = price ratios, bin n_bins-1 = "no peak".
+        Expected values computed only from price bins (excl. no-peak bin).
+        """
         probs = self.predict(sequence)
         n_bins = self.config.n_bins
+        n_price_bins = n_bins - 1
         price_range = self.config.price_range
-        bin_centers = np.linspace(-price_range, price_range, n_bins)
+        bin_centers = np.linspace(-price_range, price_range, n_price_bins)
 
-        expected_resistance = {
-            h: float((probs[f"resistance_{h}"] * bin_centers).sum())
-            for h in ["5d", "20d", "60d"]
-        }
-        expected_support = {
-            h: float((probs[f"support_{h}"] * bin_centers).sum())
-            for h in ["5d", "20d", "60d"]
-        }
+        def _expected(name: str) -> tuple[float, float, float]:
+            h = probs[name]
+            price_probs = h[:n_price_bins]
+            no_peak_prob = float(h[n_price_bins])
+            price_sum = price_probs.sum()
+            if price_sum > 1e-6:
+                p_norm = price_probs / price_sum
+                exp = float((p_norm * bin_centers).sum())
+            else:
+                p_norm = price_probs
+                exp = 0.0
+            near = (bin_centers > exp - 0.01) & (bin_centers < exp + 0.01)
+            conf = float(price_probs[near].sum() / max(price_sum, 1e-6))
+            return exp, conf, no_peak_prob
+
+        expected_resistance = {}
+        expected_support = {}
+        for h in ["5d", "20d", "60d"]:
+            expected_resistance[h], _, _ = _expected(f"resistance_{h}")
+            expected_support[h], _, _ = _expected(f"support_{h}")
 
         expected_up = expected_resistance["5d"]
         expected_down = -expected_support["5d"]
-        rr_ratio = expected_up / max(expected_down, 1e-6)
+        rr_ratio = abs(expected_up) / max(abs(expected_down), 1e-6)
 
-        near_support_mask = (bin_centers > expected_support["5d"] - 0.01) & (
-            bin_centers < expected_support["5d"] + 0.01
-        )
-        support_confidence = float(probs["support_5d"][near_support_mask].sum())
-        entry = rr_ratio > 2.0 and support_confidence > 0.1
+        _, sup_conf, _ = _expected("support_5d")
+        entry = rr_ratio > 2.0 and sup_conf > 0.1
 
-        near_resistance_mask = (bin_centers > expected_resistance["5d"] - 0.01) & (
-            bin_centers < expected_resistance["5d"] + 0.01
-        )
-        resistance_confidence = float(
-            probs["resistance_5d"][near_resistance_mask].sum()
-        )
-        exit = resistance_confidence > 0.3
+        _, res_conf, _ = _expected("resistance_5d")
+        exit = res_conf > 0.3
 
         return {
             "entry": entry,
@@ -161,6 +209,6 @@ class SRInference:
             "rr_ratio": rr_ratio,
             "expected_up": expected_up,
             "expected_down": expected_down,
-            "support_confidence": support_confidence,
-            "resistance_confidence": resistance_confidence,
+            "support_confidence": sup_conf,
+            "resistance_confidence": res_conf,
         }

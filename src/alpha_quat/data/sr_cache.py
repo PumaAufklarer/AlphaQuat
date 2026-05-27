@@ -1,7 +1,9 @@
-"""Alpha360 cache builder — pre-compute 6 raw features + SR labels per day.
+"""Alpha360 cache builder — pre-compute features + SR labels per day.
 
 Output: data/alpha360/YYYYMMDD.parquet — one file per date with columns:
   ts_code, open, high, low, close, volume, vwap,
+  volume_ratio, turnover_rate, hl_ratio, ret_5d, close_ma20, atr_ratio,
+  vol_change, amt_change,
   resistance_5d_price, resistance_5d_dist,
   resistance_20d_price, resistance_20d_dist,
   resistance_60d_price, resistance_60d_dist,
@@ -22,7 +24,25 @@ logger = logging.getLogger(__name__)
 
 _OUTPUT_DIR = "alpha360"
 
-_FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
+_FEATURE_COLS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+]
+_NEW_FEATURE_COLS = [
+    "volume_ratio",
+    "turnover_rate",
+    "hl_ratio",
+    "ret_5d",
+    "close_ma20",
+    "atr_ratio",
+    "vol_change",
+    "amt_change",
+]
+_ALL_FEATURE_COLS = _FEATURE_COLS + _NEW_FEATURE_COLS
 _SR_SUFFIXES = ["5d", "20d", "60d"]
 
 _HORIZONS = [
@@ -49,6 +69,26 @@ def _load_all_daily(data_dir: Path) -> pd.DataFrame:
         all_df = all_df.rename(columns={"vol": "volume"})
     all_df["vwap"] = all_df["amount"] / all_df["volume"].replace(0, np.nan)
     return all_df
+
+
+def _load_all_daily_basic(data_dir: Path) -> pd.DataFrame:
+    basic_dir = data_dir / "daily_basic"
+    files = sorted(basic_dir.glob("*.parquet"))
+    if not files:
+        logger.warning("No daily_basic parquet files found in %s", basic_dir)
+        return pd.DataFrame(columns=["ts_code", "trade_date", "turnover_rate"])
+
+    chunks = []
+    for f in files:
+        df = pd.read_parquet(f)
+        df["trade_date"] = f.stem.replace("_", "")
+        chunks.append(df)
+    all_df = pd.concat(chunks, ignore_index=True)
+
+    if "turnover_rate" not in all_df.columns:
+        logger.warning("daily_basic missing 'turnover_rate' column")
+        all_df["turnover_rate"] = 0.0
+    return all_df[["ts_code", "trade_date", "turnover_rate"]]
 
 
 def _find_local_peaks(prices: np.ndarray, neighborhood: int) -> np.ndarray:
@@ -118,15 +158,65 @@ def _nearest_peak_and_dist(
     return price_out, dist_out
 
 
+def _compute_derived_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute per-stock time-series features. Assumes df is sorted by trade_date."""
+    close = pd.to_numeric(df["close"], errors="coerce").replace(0, np.nan)
+    vol = pd.to_numeric(df["volume"], errors="coerce").replace(0, np.nan)
+    amount = pd.to_numeric(df["amount"], errors="coerce").replace(0, np.nan)
+
+    # Volume ratio: vol / MA(vol, 20)
+    df["volume_ratio"] = vol / vol.rolling(20, min_periods=1).mean()
+    df["volume_ratio"] = df["volume_ratio"].fillna(1.0)
+
+    # turnover_rate is already in df from daily_basic merge, fill missing with 0
+    df["turnover_rate"] = df.get(
+        "turnover_rate", pd.Series(0.0, index=df.index)
+    ).fillna(0.0)
+
+    # HL ratio: (high - low) / close
+    df["hl_ratio"] = (df["high"] - df["low"]) / close
+    df["hl_ratio"] = df["hl_ratio"].fillna(0.0)
+
+    # Ret 5d: close / close[5] - 1
+    df["ret_5d"] = df["close"] / df["close"].shift(5) - 1
+    df["ret_5d"] = df["ret_5d"].fillna(0.0)
+
+    # Close MA20: close / MA(close, 20) - 1
+    df["close_ma20"] = df["close"] / close.rolling(20, min_periods=1).mean() - 1
+    df["close_ma20"] = df["close_ma20"].fillna(0.0)
+
+    # ATR(14): max(high-low, high-prev_close, low-prev_close), smoothed
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - df["close"].shift(1)).abs(),
+            (df["low"] - df["close"].shift(1)).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    df["atr_ratio"] = tr.rolling(14, min_periods=1).mean() / close
+    df["atr_ratio"] = df["atr_ratio"].fillna(0.0)
+
+    # Vol change: log(vol / vol[1])
+    df["vol_change"] = np.log(vol / vol.shift(1))
+    df["vol_change"] = df["vol_change"].fillna(0.0)
+
+    # Amount change: log(amount / amount[1])
+    df["amt_change"] = np.log(amount / amount.shift(1))
+    df["amt_change"] = df["amt_change"].fillna(0.0)
+
+    return df
+
+
 def _process_one_stock(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute SR labels for one stock with vectorized operations."""
+    """Compute SR labels + derived features for one stock."""
     df = df.sort_values("trade_date").reset_index(drop=True)
+    df = _compute_derived_features(df)
+
     high = df["high"].to_numpy(dtype=float)
     low = df["low"].to_numpy(dtype=float)
 
-    out = df[
-        ["ts_code", "trade_date", "open", "high", "low", "close", "volume", "vwap"]
-    ].copy()
+    out = df[["ts_code", "trade_date"] + _ALL_FEATURE_COLS].copy()
 
     for suffix, neighborhood, lookahead in _HORIZONS:
         # Resistance: local peak + verification + nearest fill
@@ -155,6 +245,17 @@ def build_cache(data_dir: Path) -> int:
         all_df["ts_code"].nunique(),
     )
 
+    # Load and merge daily_basic for turnover_rate
+    basic_df = _load_all_daily_basic(data_dir)
+    if not basic_df.empty:
+        all_df = all_df.merge(
+            basic_df[["ts_code", "trade_date", "turnover_rate"]],
+            on=["ts_code", "trade_date"],
+            how="left",
+        )
+    else:
+        all_df["turnover_rate"] = 0.0
+
     results: list[pd.DataFrame] = []
     for ts_code, stock_df in tqdm(
         all_df.groupby("ts_code", sort=False), desc="Processing stocks"
@@ -170,7 +271,7 @@ def build_cache(data_dir: Path) -> int:
         for s in _SR_SUFFIXES
         for attr in ("price", "dist")
     ]
-    all_cols = ["ts_code", "trade_date"] + _FEATURE_COLS + sr_cols
+    all_cols = ["ts_code", "trade_date"] + _ALL_FEATURE_COLS + sr_cols
     out_df = out_df[[c for c in all_cols if c in out_df.columns]]
 
     output_dir = data_dir / _OUTPUT_DIR

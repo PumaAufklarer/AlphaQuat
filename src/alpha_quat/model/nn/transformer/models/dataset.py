@@ -10,7 +10,22 @@ from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
-_FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
+_FEATURE_COLS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "volume_ratio",
+    "turnover_rate",
+    "hl_ratio",
+    "ret_5d",
+    "close_ma20",
+    "atr_ratio",
+    "vol_change",
+    "amt_change",
+]
 _SR_PRICE_COLS = [
     f"{side}_{s}_price"
     for side in ("resistance", "support")
@@ -48,21 +63,32 @@ def _compute_log_vol_stats(df: pd.DataFrame) -> tuple[float, float]:
 def _normalize_sequence(
     x: np.ndarray, log_vol_mean: float, log_vol_std: float
 ) -> np.ndarray:
-    """Normalize a (60, 6) sequence: price ratios + log volume."""
+    """Normalize a (60, N) sequence: price ratios + log vol + per-seq z-score."""
     out = x.copy().astype(np.float32)
     close_last = out[-1, 3]
     if close_last <= 0:
         close_last = 1.0
 
-    # Price features → relative to last close
+    # Original price features (indices 0,1,2,3,5) → relative to last close
     out[:, 0] = out[:, 0] / close_last - 1  # open
     out[:, 1] = out[:, 1] / close_last - 1  # high
     out[:, 2] = out[:, 2] / close_last - 1  # low
     out[:, 3] = out[:, 3] / close_last - 1  # close
     out[:, 5] = out[:, 5] / close_last - 1  # vwap
 
-    # Volume → log transform + z-score
+    # Volume (index 4) → log transform + z-score
     out[:, 4] = (np.log1p(out[:, 4]) - log_vol_mean) / log_vol_std
+
+    # New features (indices 6+): per-sequence z-score
+    for j in range(6, x.shape[1]):
+        col = out[:, j]
+        mean = col.mean()
+        std = col.std()
+        if std > 1e-8:
+            out[:, j] = (col - mean) / std
+        else:
+            out[:, j] = 0.0
+        out[:, j] = np.clip(out[:, j], -5.0, 5.0)
 
     return out
 
@@ -78,7 +104,7 @@ def _build_sequences(
 ):
     """Build (X, y, weight) sequences from per-stock data.
 
-    X: (seq_length, 6) — per-sequence normalized
+    X: (seq_length, n_features) — per-sequence normalized
     y: (6,) int64 — correct bin index per horizon
     weight: (6,) float32 — distance-decayed weight, 0 for invalid
     """
@@ -97,23 +123,25 @@ def _build_sequences(
 
             if np.isnan(x).any():
                 continue
-            if np.isnan(prices).all():
-                continue
 
             x = _normalize_sequence(x, log_vol_mean, log_vol_std)
 
-            valid = ~np.isnan(prices)
+            has_peak = ~np.isnan(prices)
             y = np.zeros(6, dtype=np.int64)
             w = np.zeros(6, dtype=np.float32)
 
             for j in range(6):
-                if valid[j]:
+                if has_peak[j]:
                     close_last = vals[i + seq_length - 1, 3]
                     ratio = (prices[j] - close_last) / close_last
-                    bin_idx = int((ratio / price_range + 1) * n_bins / 2)
-                    bin_idx = max(0, min(n_bins - 1, bin_idx))
+                    n_price_bins = n_bins - 1
+                    bin_idx = int((ratio / price_range + 1) * n_price_bins / 2)
+                    bin_idx = max(0, min(n_price_bins - 1, bin_idx))
                     y[j] = bin_idx
                     w[j] = 1.0 / (1.0 + dists[j] / 5.0)
+                else:
+                    y[j] = n_bins - 1
+                    w[j] = 1.0
 
             features.append(x)
             labels.append(y)

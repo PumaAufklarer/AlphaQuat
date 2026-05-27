@@ -6,8 +6,8 @@ class TransformerConfig:
     # Data
     seq_length: int = 60
     stride: int = 10
-    n_features: int = 6
-    n_bins: int = 100
+    n_features: int = 14
+    n_bins: int = 101
     price_range: float = 0.20
 
     # Model

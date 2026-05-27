@@ -32,8 +32,13 @@ def evaluate(
     model.eval()
     loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
+    n_bins = config.n_bins
+    no_peak_bin = n_bins - 1
+
     horizon_losses = {h: [] for h in _HORIZON_NAMES}
     horizon_top3 = {h: [] for h in _HORIZON_NAMES}
+    horizon_peak_detect = {h: [] for h in _HORIZON_NAMES}
+    horizon_price_top3 = {h: [] for h in _HORIZON_NAMES}
     all_entropies = []
 
     for x, y, m in loader:
@@ -43,8 +48,8 @@ def evaluate(
 
         for h_idx in range(6):
             h_name = _HORIZON_NAMES[h_idx]
-            h_mask = m[:, h_idx]  # float weight
-            h_valid = h_mask > 0  # convert to bool for indexing
+            h_mask = m[:, h_idx]
+            h_valid = h_mask > 0
 
             if h_valid.sum() == 0:
                 continue
@@ -59,6 +64,23 @@ def evaluate(
             top3_hit = (top3 == true_bin.unsqueeze(1)).any(dim=1).float()
             horizon_top3[h_name].extend(top3_hit[h_valid].cpu().numpy().tolist())
 
+            # Binary peak detection: is model's top-1 the "no peak" bin?
+            top1 = probs[:, h_idx].argmax(dim=1)
+            true_has_peak = true_bin != no_peak_bin
+            pred_has_peak = top1 != no_peak_bin
+            peak_correct = (pred_has_peak == true_has_peak).float()
+            horizon_peak_detect[h_name].extend(
+                peak_correct[h_valid].cpu().numpy().tolist()
+            )
+
+            # Price-only top-3: only on samples that actually have a peak
+            has_peak_mask = true_has_peak & h_valid
+            if has_peak_mask.sum() > 0:
+                price_top3 = (top3 == true_bin.unsqueeze(1)).any(dim=1).float()
+                horizon_price_top3[h_name].extend(
+                    price_top3[has_peak_mask].cpu().numpy().tolist()
+                )
+
         entropies = -(probs * torch.log(probs + 1e-8)).sum(dim=-1)
         all_entropies.extend(entropies.mean(dim=1).cpu().numpy().tolist())
 
@@ -66,11 +88,19 @@ def evaluate(
     for h_name in _HORIZON_NAMES:
         losses = np.array(horizon_losses[h_name])
         top3 = np.array(horizon_top3[h_name])
+        peak_detect = np.array(horizon_peak_detect[h_name])
+        price_top3 = np.array(horizon_price_top3[h_name])
         metrics[f"{h_name}_loss"] = (
             float(losses.mean()) if len(losses) > 0 else float("nan")
         )
         metrics[f"{h_name}_top3_acc"] = (
             float(top3.mean()) if len(top3) > 0 else float("nan")
+        )
+        metrics[f"{h_name}_peak_detection"] = (
+            float(peak_detect.mean()) if len(peak_detect) > 0 else float("nan")
+        )
+        metrics[f"{h_name}_price_top3_given_peak"] = (
+            float(price_top3.mean()) if len(price_top3) > 0 else float("nan")
         )
 
     metrics["avg_entropy"] = float(np.mean(all_entropies))
@@ -84,10 +114,12 @@ def evaluate(
     logger.info("Evaluation results:")
     for h_name in _HORIZON_NAMES:
         logger.info(
-            "  %s: loss=%.4f top3_acc=%.3f",
+            "  %s: loss=%.4f top3=%.3f pdet=%.3f ptop3=%.3f",
             h_name,
             metrics[f"{h_name}_loss"],
             metrics[f"{h_name}_top3_acc"],
+            metrics[f"{h_name}_peak_detection"],
+            metrics[f"{h_name}_price_top3_given_peak"],
         )
     logger.info("  avg_entropy=%.4f", metrics["avg_entropy"])
 

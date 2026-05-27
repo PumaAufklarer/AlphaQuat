@@ -21,17 +21,17 @@ class PositionalEncoding(nn.Module):
 
 
 class StockTransformer(nn.Module):
-    """Transformer that predicts SR distributions from 60-day OHLCV sequences."""
+    """Transformer that predicts SR distributions from 60-day sequences."""
 
     def __init__(
         self,
-        n_features: int = 6,
+        n_features: int = 14,
         d_model: int = 128,
         nhead: int = 4,
         n_layers: int = 4,
         dim_feed: int = 512,
         dropout: float = 0.1,
-        n_bins: int = 100,
+        n_bins: int = 101,
     ):
         super().__init__()
         self.input_proj = nn.Linear(n_features, d_model)

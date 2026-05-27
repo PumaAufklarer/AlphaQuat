@@ -13,7 +13,22 @@ from alpha_quat.strategy.types import SignalResult, StrategyContext
 
 logger = logging.getLogger(__name__)
 
-_FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
+_FEATURE_COLS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "volume_ratio",
+    "turnover_rate",
+    "hl_ratio",
+    "ret_5d",
+    "close_ma20",
+    "atr_ratio",
+    "vol_change",
+    "amt_change",
+]
 
 
 def _load_recent_alpha360(

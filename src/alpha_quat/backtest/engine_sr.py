@@ -17,7 +17,22 @@ from alpha_quat.strategy.types import SignalResult
 
 logger = logging.getLogger(__name__)
 
-_FEATURE_COLS = ["open", "high", "low", "close", "volume", "vwap"]
+_FEATURE_COLS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "vwap",
+    "volume_ratio",
+    "turnover_rate",
+    "hl_ratio",
+    "ret_5d",
+    "close_ma20",
+    "atr_ratio",
+    "vol_change",
+    "amt_change",
+]
 
 
 MAX_POS_PCT = 0.25
