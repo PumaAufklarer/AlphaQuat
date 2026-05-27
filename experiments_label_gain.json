@@ -1,0 +1,121 @@
+[
+  {
+    "experiment": "exp_lbl_baseline",
+    "variant": "baseline",
+    "desc": "NTILE=10, linear[0..9]",
+    "n_tile": 10,
+    "label_gain": null,
+    "seed": 42,
+    "trials": 30,
+    "ics": {
+      "5d": {
+        "mean_ic": 0.1189,
+        "icir": 0.9113
+      },
+      "20d": {
+        "mean_ic": 0.1335,
+        "icir": 0.8689
+      },
+      "60d": {
+        "mean_ic": 0.0392,
+        "icir": 0.4438
+      }
+    },
+    "sharpe": 1.2888,
+    "cum_ret": 0.4233,
+    "annual_ret": 0.2213,
+    "max_dd": -0.1577,
+    "win_rate": 0.5896,
+    "trades": 508,
+    "best_params": {
+      "num_leaves": 31,
+      "learning_rate": 0.05,
+      "n_estimators": 200,
+      "feature_fraction": 0.8,
+      "bagging_fraction": 0.8
+    }
+  },
+  {
+    "experiment": "exp_lbl_expgain",
+    "variant": "expgain",
+    "desc": "NTILE=10, exp gain ~42:1",
+    "n_tile": 10,
+    "label_gain": [
+      0,
+      1,
+      2,
+      4,
+      7,
+      11,
+      16,
+      23,
+      31,
+      42
+    ],
+    "seed": 42,
+    "trials": 30,
+    "ics": {
+      "5d": {
+        "mean_ic": 0.094,
+        "icir": 0.8896
+      },
+      "20d": {
+        "mean_ic": 0.1152,
+        "icir": 0.7322
+      },
+      "60d": {
+        "mean_ic": 0.077,
+        "icir": 0.6878
+      }
+    },
+    "sharpe": 0.0663,
+    "cum_ret": 0.0004,
+    "annual_ret": 0.0002,
+    "max_dd": -0.0627,
+    "win_rate": 0.5016,
+    "trades": 618,
+    "best_params": {
+      "num_leaves": 31,
+      "learning_rate": 0.05,
+      "n_estimators": 200,
+      "feature_fraction": 0.8,
+      "bagging_fraction": 0.8
+    }
+  },
+  {
+    "experiment": "exp_lbl_ntile5",
+    "variant": "ntile5",
+    "desc": "NTILE=5, linear[0..4]",
+    "n_tile": 5,
+    "label_gain": null,
+    "seed": 42,
+    "trials": 30,
+    "ics": {
+      "5d": {
+        "mean_ic": 0.1073,
+        "icir": 0.8992
+      },
+      "20d": {
+        "mean_ic": 0.1396,
+        "icir": 1.017
+      },
+      "60d": {
+        "mean_ic": 0.025,
+        "icir": 0.2933
+      }
+    },
+    "sharpe": 0.3567,
+    "cum_ret": 0.0237,
+    "annual_ret": 0.0133,
+    "max_dd": -0.0734,
+    "win_rate": 0.5778,
+    "trades": 192,
+    "best_params": {
+      "num_leaves": 31,
+      "learning_rate": 0.05,
+      "n_estimators": 200,
+      "feature_fraction": 0.8,
+      "bagging_fraction": 0.8
+    }
+  }
+]

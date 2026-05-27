@@ -31,6 +31,61 @@ Each variant is a separate file inheriting from `LightGBMBasePipeline(ABC)`, reg
 
 `pipeline.py` is a factory — `run_variant(data_dir, ExperimentConfig)` dispatches to the right variant. Never instantiate `LightGBMPipeline` directly.
 
+#### Label construction (2026-05 experiments)
+
+Extensive experiments on label design for LambdaRank (see `experiments_label_gain.md`):
+
+| Experiment | NTILE | label_gain | 5d IC | 20d IC | 60d IC | Sharpe |
+|-----------|-------|-----------|-------|--------|--------|--------|
+| linear baseline | 10 | [0..9] | 0.119 | 0.134 | 0.039 | 1.29 |
+| exponential gain | 10 | [0,1,2,4,7,11,16,23,31,42] | 0.094 | 0.115 | 0.077 | 0.07 |
+| n_tile=5 | 5 | [0..4] | 0.107 | 0.140 | 0.025 | 0.36 |
+
+**Findings:**
+- Linear label_gain with NTILE=10 is optimal (exponential gain causes extreme overfitting on top deciles)
+- NTILE=5 loses ranking granularity → fewer trades, worse Sharpe
+- LambdaRank tuning bug fixed: `_objective_lambdarank` only tuned `n_estimators` before; now tunes all 8 hyperparams
+
+**Label formula — hybrid approach (current default):**
+
+60d label was the bottleneck (IC=0.04 with path-aware formula). Root cause: `(close-min_low)/(max_high-min_low)` has path dependency that dominates at 60d horizon.
+
+| Horizon | Formula | Rationale |
+|---------|---------|-----------|
+| 5d | `(close_5 - min_low_5) / (max_high_5 - min_low_5)` | Path-aware preserves short-term signal |
+| 20d | `(close_20 - min_low_20) / (max_high_20 - min_low_20)` | Path-aware preserves medium-term signal |
+| **60d** | `close_60 / close - 1` **(Qlib-style raw return)** | Eliminates path noise; 60d IC doubled 0.039→0.075 |
+
+QLib reference: Microsoft's Qlib uses `Ref($close, -2)/Ref($close, -1) - 1` (1-day raw return) with MSE regression — no LambdaRank, no NTILE, no path-aware labels. Their simplicity proves that raw return labels work well for ranking.
+
+**Industry features (2026-05):**
+
+5 industry-relative continuous ratio features added to factor set:
+
+```
+PE_TTM_ind = PE / industry_median(PE)   MV_ind = MV / industry_median(MV)
+PB_ind     = PB / industry_median(PB)   TURN_ind = TURN / industry_median(TURN)
+ROE_ind    = ROE / industry_median(ROE)
+```
+
+- **Categorical industry column caused overfitting**: 60d model size +74%, industry gain=870 vs #2=263
+- **Continuous ratios avoid categorical splits**: +0.20 Sharpe, drawdown -15.8%→-11.7%
+
+**Current best config (2026-05 OOS):**
+
+| Metric | Value |
+|--------|-------|
+| Train | 2023-01 ~ 2024-06 (18 months) |
+| Test | 2024-07 ~ 2026-05 (23 months) |
+| Features | 211 Alpha158 + Alpha_ext + Alpha_fund + 5 industry ratios |
+| Labels | Hybrid (5d/20d path-aware, 60d raw return) |
+| Model | LambdaRank, NTILE=10, linear gain, 30-trial Optuna, score_momentum weighting |
+| Sharpe | **1.41** |
+| Cum Return | +41.06% |
+| Max DD | -11.82% |
+| Win Rate | 73.6% |
+| Trades | 226 (weekly rebalance, top-15) |
+
 **Model output:** `data/models/experiments/<name>/` with `experiment.yaml` config snapshot + model files.
 
 ### Neural network (`model/nn/`)

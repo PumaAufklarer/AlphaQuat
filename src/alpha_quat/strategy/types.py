@@ -11,6 +11,7 @@ class StrategyContext:
     prices: pd.DataFrame | None = None
     prev_holdings: pd.DataFrame | None = None
     constraints: dict | None = None
+    close_history: dict[str, list[float]] | None = None  # ts_code -> last N closes
 
 
 @dataclass

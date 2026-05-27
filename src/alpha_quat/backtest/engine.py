@@ -15,6 +15,8 @@ from alpha_quat.strategy.positions.equal_weight import EqualWeightTopKPosition
 
 logger = logging.getLogger(__name__)
 
+_CLOSE_HISTORY_WINDOW = 30  # trading days for vol computation
+
 
 def _ymd_to_path(ymd: str) -> str:
     return f"{ymd[:4]}_{ymd[4:6]}_{ymd[6:8]}"
@@ -44,13 +46,22 @@ class BacktestEngine:
                 short_factor=config.short_factor, long_factor=config.long_factor
             )
 
-        self.position_mgr = EqualWeightTopKPosition(top_k=config.top_k)
+        if config.weighting_strategy == "vol_parity":
+            from alpha_quat.strategy.positions.vol_parity import (
+                VolParityPositionManager,
+            )
+
+            self.position_mgr = VolParityPositionManager(top_k=config.top_k)
+        else:
+            self.position_mgr = EqualWeightTopKPosition(top_k=config.top_k)
+
         self._pending_signals = None
         self._total_invested = config.initial_capital
         self._last_rebalance_idx: int | None = None
         self._additions: dict[str, float] = {}  # date -> capital added
         self._score_history: dict[str, list[float]] = {}  # stock -> list of scores
         self._prev_close: dict[str, float] = {}  # T-1 close for stop-loss
+        self._close_history: dict[str, list[float]] = {}  # ts_code -> last N closes
 
     def run(self):
         cal_path = self.data_dir / "trade_cal.parquet"
@@ -98,6 +109,14 @@ class BacktestEngine:
             daily = pd.read_parquet(daily_path)
             open_px = dict(zip(daily["ts_code"], daily["open"]))
             close_px = dict(zip(daily["ts_code"], daily["close"]))
+
+            # Track rolling close history for vol computation
+            for code, px in close_px.items():
+                hist = self._close_history.setdefault(code, [])
+                hist.append(px)
+                if len(hist) > _CLOSE_HISTORY_WINDOW:
+                    hist.pop(0)
+
             universe = build_universe(
                 td,
                 self.data_dir,
@@ -110,21 +129,22 @@ class BacktestEngine:
 
             # Trailing stop-loss: sell if T-1 close < peak × (1 − stop_loss_pct)
             # Execution at today's open (uses yesterday's close to trigger)
-            for code, h in list(self.portfolio.holdings.items()):
-                prev_close = self._prev_close.get(code)
-                if prev_close and prev_close < h.peak_price * (
-                    1.0 - self.config.stop_loss_pct
-                ):
-                    px = open_px.get(code)
-                    if px and px > 0 and code in universe:
-                        self.portfolio.sell(
-                            ts_code=code,
-                            price=px,
-                            shares=h.shares,
-                            trade_date=td,
-                            commission_rate=self.config.commission_rate,
-                            min_commission=self.config.min_commission,
-                        )
+            if self.config.stop_loss_pct > 0:
+                for code, h in list(self.portfolio.holdings.items()):
+                    prev_close = self._prev_close.get(code)
+                    if prev_close and prev_close < h.peak_price * (
+                        1.0 - self.config.stop_loss_pct
+                    ):
+                        px = open_px.get(code)
+                        if px and px > 0 and code in universe:
+                            self.portfolio.sell(
+                                ts_code=code,
+                                price=px,
+                                shares=h.shares,
+                                trade_date=td,
+                                commission_rate=self.config.commission_rate,
+                                min_commission=self.config.min_commission,
+                            )
 
             if (
                 self._pending_signals is not None
@@ -139,6 +159,7 @@ class BacktestEngine:
                     capital=self.portfolio.total_value(open_px),
                     universe=list(universe),
                     prices=prices_df,
+                    close_history=self._close_history,
                 )
 
                 buy_sigs = sig_df.loc[sig_df["action"] == "buy"]
@@ -214,7 +235,11 @@ class BacktestEngine:
                     buy_codes = []
                     for code, h in list(self.portfolio.holdings.items()):
                         px = close_px.get(code)
-                        if px and px < h.peak_price * (1 - self.config.stop_loss_pct):
+                        if (
+                            self.config.stop_loss_pct > 0
+                            and px
+                            and px < h.peak_price * (1 - self.config.stop_loss_pct)
+                        ):
                             sell_codes.append(code)
                             continue
                         if (
@@ -307,10 +332,10 @@ class BacktestEngine:
                     adjusted = all_scores.copy()
 
                     if strat == "vol_parity":
-                        vol_col = [c for c in features.columns if "KLEN38" in c]
-                        if vol_col:
-                            vol = features[vol_col[0]].fillna(0).values + 1e-8
-                            adjusted = all_scores / vol
+                        # Score adjustment is skipped — VolParityPositionManager
+                        # handles inverse-variance weighting at allocation time.
+                        # Raw model scores are used for top-K selection.
+                        adjusted = all_scores.copy()
                     elif strat == "kelly":
                         for i, code in enumerate(signal_result.signals["ts_code"]):
                             raw = all_scores[i]

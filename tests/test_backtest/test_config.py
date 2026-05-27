@@ -10,7 +10,7 @@ class TestBacktestConfig:
         assert cfg.monthly_addition == 8000
         assert cfg.commission_rate == 0.0005
         assert cfg.min_commission == 0.0
-        assert cfg.stop_loss_pct == 0.15
+        assert cfg.stop_loss_pct == 0.0
         assert cfg.short_factor == "KLEN35"
         assert cfg.long_factor == "KLEN36"
         assert cfg.top_k == 5

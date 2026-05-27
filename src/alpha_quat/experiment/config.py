@@ -32,6 +32,9 @@ class ExperimentConfig:
 
     quantile_alphas: list[float] | None = None
 
+    n_tile: int = 10  # NTILE bins for lambdarank label construction
+    label_gain: list[int] | None = None  # if None, auto-generate exponential curve
+
     created_at: str = field(
         default_factory=lambda: datetime.now().isoformat(timespec="seconds")
     )

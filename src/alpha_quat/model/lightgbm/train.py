@@ -36,6 +36,8 @@ class LightGBMTrainer:
             n_trials=config.n_trials,
             tune=config.tune,
             feature_names=config.feature_names,
+            n_tile=config.n_tile,
+            label_gain=config.label_gain,
         )
         return cls(lgb_cfg)
 
@@ -43,11 +45,15 @@ class LightGBMTrainer:
         self, quantile_alpha: float | None = None, lambdarank: bool = False
     ) -> dict:
         if lambdarank:
+            if self.config.label_gain is not None:
+                gain = self.config.label_gain
+            else:
+                gain = list(range(self.config.n_tile))
             return {
                 "objective": "lambdarank",
                 "metric": "ndcg",
                 "ndcg_eval_at": [5, 10],
-                "label_gain": [i for i in range(10)],
+                "label_gain": gain,
                 "num_leaves": self.config.num_leaves,
                 "learning_rate": self.config.learning_rate,
                 "n_estimators": self.config.n_estimators,
@@ -129,6 +135,19 @@ class LightGBMTrainer:
         self, trial: optuna.Trial, X: pd.DataFrame, y: pd.Series, groups: list[int]
     ) -> float:
         params = self._base_params(lambdarank=True)
+        params.update(
+            {
+                "num_leaves": trial.suggest_int("num_leaves", 15, 63),
+                "learning_rate": trial.suggest_float(
+                    "learning_rate", 0.01, 0.2, log=True
+                ),
+                "feature_fraction": trial.suggest_float("feature_fraction", 0.5, 1.0),
+                "bagging_fraction": trial.suggest_float("bagging_fraction", 0.5, 1.0),
+                "min_child_samples": trial.suggest_int("min_child_samples", 10, 100),
+                "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            }
+        )
         n_est = trial.suggest_int("n_estimators", 100, 500)
 
         train_g, val_g, split = self._split_by_groups(groups)

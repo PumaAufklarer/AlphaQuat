@@ -81,7 +81,9 @@ def _build_backtest_parser(subparsers):
     parser.add_argument(
         "--commission", type=float, default=0.0005, help="Commission rate"
     )
-    parser.add_argument("--stop-loss", type=float, default=0.15, help="Stop loss pct")
+    parser.add_argument(
+        "--stop-loss", type=float, default=0.0, help="Stop loss pct (0=disabled)"
+    )
     parser.add_argument("--top-k", type=int, default=5, help="Max holdings")
     parser.add_argument("--output", default=None, help="HTML report output path")
     parser.add_argument(
@@ -342,7 +344,9 @@ def _build_backtest_sr_parser(subparsers):
     parser.add_argument("--start", default="20220101", help="Start date YYYYMMDD")
     parser.add_argument("--end", default="20241231", help="End date YYYYMMDD")
     parser.add_argument("--capital", type=float, default=50000, help="Initial capital")
-    parser.add_argument("--stop-loss", type=float, default=0.15, help="Stop loss pct")
+    parser.add_argument(
+        "--stop-loss", type=float, default=0.0, help="Stop loss pct (0=disabled)"
+    )
     return parser
 
 

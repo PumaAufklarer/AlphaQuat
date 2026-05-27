@@ -17,3 +17,6 @@ class LightGBMConfig:
     tune: bool = True
 
     feature_names: list[str] | None = None
+
+    n_tile: int = 10
+    label_gain: list[int] | None = None  # auto-exponential if None

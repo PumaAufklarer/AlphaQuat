@@ -15,7 +15,7 @@ class LambdaRankSignal(BaseMLSignal):
     def _load_models(self, model_dir: Path) -> dict:
         models = {}
         for h in ["5d", "20d", "60d"]:
-            path = model_dir / f"lightgbm_model_{h}_lambdarank.txt"
+            path = model_dir / f"lightgbm_model_{h}.txt"
             if path.exists():
                 models[h] = lgb.Booster(model_file=str(path))
         if not models:

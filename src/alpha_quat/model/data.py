@@ -64,6 +64,7 @@ class DatasetBuilder:
         val_end: str,
         feature_names: list[str] | None = None,
         lambdarank: bool = False,
+        n_tile: int = 10,
     ) -> DatasetResult:
         cal_dates = self._get_trade_dates()
         cal_arr = cal_dates.to_numpy()
@@ -148,9 +149,7 @@ class DatasetBuilder:
                    MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 5 FOLLOWING) AS min_low_5,
                    MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 5 FOLLOWING) AS max_high_5,
                    MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS min_low_20,
-                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS max_high_20,
-                   MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 60 FOLLOWING) AS min_low_60,
-                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 60 FOLLOWING) AS max_high_60
+                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS max_high_20
             FROM daily
             WINDOW w AS (PARTITION BY ts_code ORDER BY trade_date)
         ),
@@ -171,7 +170,7 @@ class DatasetBuilder:
             SELECT b.*,
                    (dw.close_5 - dw.min_low_5) / NULLIF(dw.max_high_5 - dw.min_low_5, 0) AS ret_5d,
                    (dw.close_20 - dw.min_low_20) / NULLIF(dw.max_high_20 - dw.min_low_20, 0) AS ret_20d,
-                   (dw.close_60 - dw.min_low_60) / NULLIF(dw.max_high_60 - dw.min_low_60, 0) AS ret_60d
+                   dw.close_60 / NULLIF(dw.close, 0) - 1 AS ret_60d
             FROM base b
             LEFT JOIN daily_win dw ON b.ts_code = dw.ts_code AND b.trade_date = dw.trade_date
             WHERE dw.close_5 IS NOT NULL
@@ -179,7 +178,6 @@ class DatasetBuilder:
               AND dw.close_60 IS NOT NULL
               AND dw.max_high_5 != dw.min_low_5
               AND dw.max_high_20 != dw.min_low_20
-              AND dw.max_high_60 != dw.min_low_60
               AND {factor_notnull}
         )
         """
@@ -187,9 +185,9 @@ class DatasetBuilder:
             query += f"""
             , final AS (
               SELECT *,
-                CAST(NTILE(10) OVER (PARTITION BY trade_date ORDER BY ret_5d) - 1 AS INTEGER) AS y5,
-                CAST(NTILE(10) OVER (PARTITION BY trade_date ORDER BY ret_20d) - 1 AS INTEGER) AS y20,
-                CAST(NTILE(10) OVER (PARTITION BY trade_date ORDER BY ret_60d) - 1 AS INTEGER) AS y60
+                CAST(NTILE({n_tile}) OVER (PARTITION BY trade_date ORDER BY ret_5d) - 1 AS INTEGER) AS y5,
+                CAST(NTILE({n_tile}) OVER (PARTITION BY trade_date ORDER BY ret_20d) - 1 AS INTEGER) AS y20,
+                CAST(NTILE({n_tile}) OVER (PARTITION BY trade_date ORDER BY ret_60d) - 1 AS INTEGER) AS y60
               FROM labeled
             )
             SELECT ts_code, trade_date, y5, y20, y60, {factor_select}
@@ -216,10 +214,52 @@ class DatasetBuilder:
 
         merged["trade_date"] = merged["trade_date"].astype(str)
 
+        # --- Industry-relative features: continuous ratios vs industry median ---
+        sb = pd.read_parquet(self.data_dir / "stock_basic.parquet")
+        industry_map = dict(zip(sb["ts_code"], sb["industry"]))
+        merged["industry"] = merged["ts_code"].map(industry_map).fillna("Unknown")
+
+        _IND_FACTORS = ["PE_TTM", "PB", "MV", "TURN", "ROE"]
+        for f in _IND_FACTORS:
+            if f in merged.columns:
+                ind_median = merged.groupby(["trade_date", "industry"], observed=False)[
+                    f
+                ].transform("median")
+                merged[f"{f}_ind"] = merged[f] / (ind_median + 1e-8)
+                factor_cols.append(f"{f}_ind")
+
+        # --- Cross-sectional rank: transform all features to [0,1] percentile ---
+        merged[factor_cols] = merged.groupby("trade_date")[factor_cols].rank(pct=True)
+
+        # --- Purge/embargo: prevent label leakage at train/val boundary ---
+        # Labels look forward up to max_offset (60) trading days. Samples near
+        # train_end have labels that overlap with validation data. Purge removes
+        # these. Embargo adds a gap to break feature autocorrelation.
+        cal_list = cal_dates.tolist()
+        embargo_days = 5
+        try:
+            te_idx = cal_list.index(train_end)
+            adjusted_train_end = cal_list[max(0, te_idx - max_offset)]
+        except ValueError:
+            adjusted_train_end = train_end
+        try:
+            vs_idx = cal_list.index(val_start)
+            adjusted_val_start = cal_list[min(len(cal_list) - 1, vs_idx + embargo_days)]
+        except ValueError:
+            adjusted_val_start = val_start
+        if adjusted_train_end != train_end or adjusted_val_start != val_start:
+            logger.info(
+                "Purged boundary: train_end %s→%s, val_start %s→%s",
+                train_end,
+                adjusted_train_end,
+                val_start,
+                adjusted_val_start,
+            )
+
         train_mask = (merged["trade_date"] >= train_start) & (
-            merged["trade_date"] <= train_end
+            merged["trade_date"] <= adjusted_train_end
         )
-        val_mask = (merged["trade_date"] >= val_start) & (
+        val_mask = (merged["trade_date"] >= adjusted_val_start) & (
             merged["trade_date"] <= val_end
         )
 

@@ -29,6 +29,7 @@ class LightGBMBasePipeline(ABC):
             config.val_end,
             feature_names=config.feature_names,
             lambdarank=(config.mode == "lambdarank"),
+            n_tile=config.n_tile,
         )
 
         models = self._train(data, config)

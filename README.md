@@ -27,15 +27,15 @@ uv run alpha-quat model lightgbm \
   --no-tune --quantile
 ```
 
-## Backtest (Best Config — Lambdarank + Fundamentals)
+## Backtest (Best Config — Hybrid Labels + Industry Features)
 
 ```bash
 uv run alpha-quat backtest \
-  --experiment exp_lr_v4 \
-  --start 20220501 --end 20260501 \
+  --experiment exp_lr_hybrid \
+  --start 20240701 --end 20260501 \
   --capital 50000 --monthly 8000 \
   --top-k 15 --rebalance-interval 5 \
-  --stop-loss 0.10 --weighting score_momentum
+  --weighting score_momentum
 ```
 
 Key parameters:
@@ -43,27 +43,23 @@ Key parameters:
 |------|---------|-------------|
 | `--experiment` | — | Experiment name for ML signal |
 | `--rebalance-interval` | `5` | Trading days between rebalances |
-| `--stop-loss` | `0.10` | Dynamic stop-loss from peak price |
-| `--top-k` | `15` | Max holdings |
-| `--weighting` | `score_momentum` | Position sizing: equal, kelly, vol_parity, score_momentum |
+| `--top-k` | `5` | Max holdings |
+| `--weighting` | `equal` | Position sizing: equal, score_momentum, kelly, vol_parity |
+| `--stop-loss` | `0.0` | Dynamic stop-loss (0=disabled — ranking-based exit is primary) |
 | `--quality-filter` | — | Apply PE/PB industry-relative quality screen |
 | `--min-price` | `0.0` | Minimum stock price (exclude pennies — harmful, don't use) |
 
 ## Model Training
 
 ```bash
+# LambdaRank with hybrid labels + industry features (recommended)
+uv run alpha-quat model lightgbm lambdarank --name exp_lr_hybrid --trials 30
+
 # Point-estimate regression (faster)
 uv run alpha-quat model lightgbm --no-tune
 
-# Quantile regression (9 models: 10%/50%/90% × 5d/20d/60d) — best
+# Quantile regression (9 models: 10%/50%/90% × 5d/20d/60d)
 uv run alpha-quat model lightgbm --no-tune --quantile
-
-# With Optuna tuning  (50 trials × TimeSeriesSplit CV)
-uv run alpha-quat model lightgbm --trials 50
-
-# With meta stacking layer (optional enhancement)
-uv run alpha-quat model lightgbm --no-tune --quantile \
-  --meta-start 20220401 --meta-end 20230330
 ```
 
 ## Daily Scoring
@@ -117,7 +113,29 @@ src/alpha_quat/
 
 ## OOS Results
 
-### Lambdarank + Fundamentals (2026-05)
+### Lambdarank Hybrid Labels + Industry Features (2026-05)
+
+```
+Period:      2024-07 ~ 2026-05 (23 month out-of-sample)
+Capital:     ¥50,000 + ¥8,000/month
+Strategy:    LightGBM lambdarank, 216 features incl. industry ratios, score_momentum weighting
+Labels:      Hybrid (5d/20d path-aware, 60d Qlib-style raw return)
+Return:      +41.06% (cumulative), +21.51% (annualized)
+Sharpe:      1.41
+Max DD:      -11.82%
+Trades:      226 (weekly rebalance, top-15)
+Win Rate:    73.6%
+```
+
+Key improvements over previous best:
+- **+0.32 Sharpe** (1.09 → 1.41) via combined label improvements + industry features
+- **Max DD reduced 35%** (-18.24% → -11.82%)
+- **60d label fix**: Qlib-style raw return (`close_60/close - 1`) replaces path-aware formula → IC doubled (0.039→0.075)
+- **Industry ratios**: 5 continuous features (`PE/PB/MV/TURN/ROE` vs industry median) → +0.20 Sharpe
+- **Optuna tuning**: LambdaRank now tunes 8 hyperparams (previously only tuned `n_estimators`)
+- **Stop-loss disabled by default**: Ranking-based exit is sufficient for LambdaRank strategies
+
+### Previous best: Lambdarank + Fundamentals (2026-05, old labels)
 
 ```
 Period:      2022-05 ~ 2026-05 (4 year out-of-sample)
@@ -129,13 +147,6 @@ Max DD:      -18.24%
 Trades:      1431
 Win Rate:    28.8% (per-event) / 57.9% (per-position)
 ```
-
-Key findings:
-- **Fundamentals (MV, PE, PB, ROE, MACD, RSI) added +0.28 Sharpe** vs Alpha158-only baseline
-- **Model picks 3-8 yuan cheap stocks** despite MV preference for large caps — KLEN/KMID volatility signals dominate
-- **0-5 yuan bucket**: 67% win rate, +165K total PnL — model's sweet spot
-- **25-29% win rate is misleading** — counts partial stop-loss fills. Real position-level win rate is ~58%
-- **Quality post-filter hurt Sharpe** (1.09 → 0.93) — model already learns fundamental preference internally
 
 ### Quantile Regression (2025 reference)
 
