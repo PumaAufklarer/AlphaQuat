@@ -231,6 +231,32 @@ Cross-sectional pairwise ranking model: Transformer → score per stock, trained
 
 **Root cause:** Transformer cannot learn cross-sectional stock ranking from OHLCV sequences alone. The loss decreases by exploiting correlated features (temporal features, date co-linearity) without learning actual ranking. LightGBM succeeds because its 158+ Alpha158 features include cross-sectional rank/quantile statistics, which are the actual signal source.
 
+### Key Learnings & Industry Context
+
+Gemini 3.5 analysis of the 10+ failed experiments identified three structural issues:
+
+1. **Structural prior mismatch** — GBDT is designed for tabular data (non-linear cuts, robust to outliers). Transformer assumes strong sequential semantics (language, images). Stock OHLCV has no such semantics — it's a near-random walk.
+
+2. **Information density** — LightGBM's 158+ features already include cross-sectional operators (cs_rank, cs_zscore, cs_quantile). The Transformer experiments used only per-stock features with no knowledge of the broader market cross-section.
+
+3. **Loss decrease without rank improvement** — The model learns to exploit correlated features (date co-linearity, temporal structure) to reduce pairwise margin loss without actually learning ranking. This is structural, not fixable by tuning.
+
+### Industry Approaches (Top Chinese Quant Funds)
+
+| Approach | Description | Example |
+|----------|-------------|---------|
+| **Two-stage (时序→横截面)** | Stage 1: share-weighted temporal encoder → stock embedding. Stage 2: cross-stock attention on embeddings | Spatio-Temporal Graph, Dual-Asymmetric Transformer |
+| **Foundation pretraining** | MAE-style: mask 30% of price/factor tokens, reconstruct them. Self-supervised on factors, not returns. | Creates market manifold embeddings |
+| **Transformer as factor synthesizer** | Transformer outputs 32-64 dim embeddings → appended to LightGBM 158-factor pool | Linear boost to OOS Sharpe |
+
+### Next Exploration Paths (Priority Order)
+
+| Pri | Path | Method | Expected Delta |
+|-----|------|--------|---------------|
+| 1 | **Hybrid: Transformer → LGBM** | Extract penultimate layer embeddings from rank_scorer → append to LightGBM 158 factors → retrain lambdarank | Small positive (Sharpe 1.4→1.45?) |
+| 2 | **Conditional LN** | Remove time features. Add Conditional LayerNorm conditioned on industry/market-cap. Retrain. | Validate if v5 improvement was real |
+| 3 | **Two-stage temporal+CS** | Full two-stage: temporal encoder (60d×per-stock features) → CS attention (cross-stock). | High cost, uncertain gain |
+
 ### RL / Neural models
 - **14 OHLCV features insufficient** — RL agents and ranking models fail to learn from 14 features alone.
   LightGBM lambdarank succeeds because of its 158+ cross-sectional Alpha158 features (rank/quantile/industry).
