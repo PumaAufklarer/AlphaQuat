@@ -4,6 +4,7 @@ Output: data/alpha360/YYYYMMDD.parquet — one file per date with columns:
   ts_code, open, high, low, close, volume, vwap,
   volume_ratio, turnover_rate, hl_ratio, ret_5d, close_ma20, atr_ratio,
   vol_change, amt_change,
+  keltner_pos, keltner_width, keltner_above_ema,
   resistance_5d_price, resistance_5d_dist,
   resistance_20d_price, resistance_20d_dist,
   resistance_60d_price, resistance_60d_dist,
@@ -42,7 +43,12 @@ _NEW_FEATURE_COLS = [
     "vol_change",
     "amt_change",
 ]
-_ALL_FEATURE_COLS = _FEATURE_COLS + _NEW_FEATURE_COLS
+_KELTNER_FEATURE_COLS = [
+    "keltner_pos",
+    "keltner_width",
+    "keltner_above_ema",
+]
+_ALL_FEATURE_COLS = _FEATURE_COLS + _NEW_FEATURE_COLS + _KELTNER_FEATURE_COLS
 _SR_SUFFIXES = ["5d", "20d", "60d"]
 
 _HORIZONS = [
@@ -204,6 +210,25 @@ def _compute_derived_features(df: pd.DataFrame) -> pd.DataFrame:
     # Amount change: log(amount / amount[1])
     df["amt_change"] = np.log(amount / amount.shift(1))
     df["amt_change"] = df["amt_change"].fillna(0.0)
+
+    # ── Keltner Channel features ──
+    ema20 = df["close"].ewm(span=20, adjust=False).mean()
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - df["close"].shift(1)).abs(),
+            (df["low"] - df["close"].shift(1)).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr20 = tr.rolling(20, min_periods=1).mean()
+
+    df["keltner_pos"] = (df["close"] - ema20) / (atr20 * 2.0).replace(0, np.nan)
+    df["keltner_width"] = atr20 / ema20.replace(0, np.nan)
+    df["keltner_above_ema"] = df["close"] / ema20.replace(0, np.nan) - 1.0
+
+    for col in _KELTNER_FEATURE_COLS:
+        df[col] = df[col].fillna(0.0)
 
     return df
 

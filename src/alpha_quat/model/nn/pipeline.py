@@ -14,4 +14,10 @@ def run_variant_nn(data_dir: Path, config: ExperimentConfig) -> dict:
         )
 
         return run_sr_transformer(data_dir, config)
+    if config.mode == "keltner":
+        from alpha_quat.model.nn.keltner.variants.keltner_regime import (
+            run_keltner_regime,
+        )
+
+        return run_keltner_regime(data_dir, config)
     raise ValueError(f"Unknown NN variant: {config.mode}")
