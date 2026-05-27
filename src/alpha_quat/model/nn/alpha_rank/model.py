@@ -39,3 +39,13 @@ class RankScoreTransformer(nn.Module):
         x = self.encoder(x)
         x = self.norm(x).mean(dim=1)
         return self.head(x)
+
+    def embed(self, x):
+        """Extract 64-dim embedding from penultimate layer."""
+        x = self.input_proj(x)
+        x = self.pos_enc(x)
+        x = self.encoder(x)
+        x = self.norm(x).mean(dim=1)
+        x = self.head[0](x)
+        x = self.head[1](x)
+        return x

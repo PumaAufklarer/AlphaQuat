@@ -172,14 +172,28 @@ def train_rl(
     batch_stocks: int = _BATCH_STOCKS,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
+    filter_universe: bool = True,
+    circ_mv_percentile: float | None = None,
 ):
     logger.info("Loading training data: %s ~ %s", train_start, train_end)
-    stock_data = _load_stock_data(data_dir, train_start, train_end)
+    stock_data = _load_stock_data(
+        data_dir,
+        train_start,
+        train_end,
+        filter_universe=filter_universe,
+        circ_mv_percentile=circ_mv_percentile,
+    )
     train_codes = select_stocks(stock_data, max_stocks=_MAX_STOCKS)
     logger.info("Training on %d stocks", len(train_codes))
 
     logger.info("Loading validation data: %s ~ %s", val_start, val_end)
-    val_stock_data = _load_stock_data(data_dir, val_start, val_end)
+    val_stock_data = _load_stock_data(
+        data_dir,
+        val_start,
+        val_end,
+        filter_universe=filter_universe,
+        circ_mv_percentile=circ_mv_percentile,
+    )
     val_codes = select_stocks(val_stock_data, max_stocks=500, min_days=60)
     logger.info("Validating on %d stocks", len(val_codes))
 

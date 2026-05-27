@@ -41,10 +41,12 @@ class LightGBMBasePipeline(ABC):
         results = {}
         for suffix, model in models.items():
             model.save_model(str(exp_dir / f"lightgbm_model_{suffix}.txt"))
+            hor = suffix.split("_alpha_")[0]
+            val_attr = f"y_val_{_H.get(hor, hor)}"
             eval_result = self.evaluator.evaluate(
                 model=model,
                 X_val=data.X_val,
-                y_val=getattr(data, f"y_val_{_H.get(suffix, suffix)}"),
+                y_val=getattr(data, val_attr),
                 val_dates=data.val_dates,
                 val_codes=data.val_codes,
                 best_params={},

@@ -26,9 +26,17 @@ def evaluate(
     start: str,
     end: str,
     max_stocks: int = 100,
+    filter_universe: bool = True,
+    circ_mv_percentile: float | None = None,
 ) -> dict:
     """Evaluate model with multi-horizon reward (5d + 20d). Uses raw reward (no baseline)."""
-    stock_data = _load_stock_data(data_dir, start, end)
+    stock_data = _load_stock_data(
+        data_dir,
+        start,
+        end,
+        filter_universe=filter_universe,
+        circ_mv_percentile=circ_mv_percentile,
+    )
     codes = select_stocks(stock_data, max_stocks=max_stocks)
     model.eval()
 

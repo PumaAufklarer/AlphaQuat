@@ -94,13 +94,37 @@ def _build_flat(data_dir: Path, start: str, end: str, cache_name: str = "rank_fl
     if not all_dates:
         raise FileNotFoundError(f"No alpha360 cache for {start}~{end}")
 
+    # Load universe filters
+    sb = pd.read_parquet(data_dir / "stock_basic.parquet")
+    main_board = set(sb.loc[sb["market"] == "主板", "ts_code"])
+    st_dir = data_dir / "stock_st"
+    st_set: set[tuple[str, str]] = set()
+    for f in st_dir.glob("*.parquet"):
+        ds = f.stem.replace("_", "")
+        if start <= ds <= end:
+            st = pd.read_parquet(f)
+            st["trade_date"] = ds
+            for _, row in st.iterrows():
+                st_set.add((str(row["ts_code"]), ds))
+
     chunks = []
     for d in all_dates:
         df = pd.read_parquet(cache_dir / f"{d}.parquet")
         df["trade_date"] = d
+        df = df[df["ts_code"].isin(main_board)]
+        if st_set:
+            st_mask = df.apply(
+                lambda r: (r["ts_code"], r["trade_date"]) in st_set, axis=1
+            )
+            df = df[~st_mask]
         chunks.append(df)
     full = pd.concat(chunks, ignore_index=True)
-    logger.info("Loaded %d rows from %s to %s", len(full), start, end)
+    logger.info(
+        "Loaded %d rows from %s to %s (filtered: 主板 + non-ST)",
+        len(full),
+        start,
+        end,
+    )
 
     # Compute forward 5-day return per stock (vectorized)
     full = full.sort_values(["ts_code", "trade_date"])

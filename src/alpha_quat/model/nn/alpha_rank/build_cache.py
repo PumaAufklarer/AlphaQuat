@@ -149,7 +149,7 @@ def build_numpy(flat_path: Path, out_dir: Path):
         df.groupby(["trade_date", "industry"])["ret_5d"].transform("median").fillna(0)
     )
 
-    X, R, D = [], [], []
+    X, R, D, D_codes = [], [], [], []
     total_stocks = len(df.groupby("ts_code", sort=False))
     logger.info("Building sequences: %d stocks, %d features/day", total_stocks, n_feat)
 
@@ -220,9 +220,11 @@ def build_numpy(flat_path: Path, out_dir: Path):
         seqs_norm = seqs.copy()
         seqs_norm[keep] = _norm_seq(seqs[keep])
 
+        n_keep = keep.sum()
         X.append(seqs_norm[keep])
         R.append(rets[keep])
         D.extend(np.array(out_dates)[keep])
+        D_codes.extend([code] * n_keep)
 
     X_all = np.concatenate(X, axis=0).astype(np.float32)
     R_all = np.concatenate(R, axis=0)
@@ -231,7 +233,14 @@ def build_numpy(flat_path: Path, out_dir: Path):
     np.save(out_x, X_all)
     np.save(out_r, R_all)
     np.save(out_d, np.array(D))
-    logger.info("Saved X%s R%s dates(%d)", X_all.shape, R_all.shape, len(D))
+    np.save(out_dir / "codes.npy", np.array(D_codes))
+    logger.info(
+        "Saved X%s R%s dates(%d) codes(%d)",
+        X_all.shape,
+        R_all.shape,
+        len(D),
+        len(D_codes),
+    )
 
 
 def build(data_dir, out_dir, start, end, quality_filter=False):
