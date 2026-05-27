@@ -20,4 +20,10 @@ def run_variant_nn(data_dir: Path, config: ExperimentConfig) -> dict:
         )
 
         return run_keltner_regime(data_dir, config)
+    if config.mode == "rl_agent":
+        from alpha_quat.model.nn.rl_agent.variants.rl_agent_variant import (
+            run_rl_agent,
+        )
+
+        return run_rl_agent(data_dir, config)
     raise ValueError(f"Unknown NN variant: {config.mode}")

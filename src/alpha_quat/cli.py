@@ -410,7 +410,7 @@ def _build_model_parser(subparsers):
     nn_parser = model_sub.add_parser("nn", help="Neural network models")
     nn_parser.add_argument(
         "nn_type",
-        choices=["sr_transformer", "keltner"],
+        choices=["sr_transformer", "keltner", "rl_agent"],
         help="NN variant to train",
     )
     nn_parser.add_argument("--name", required=True, help="Experiment name")
