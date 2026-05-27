@@ -114,6 +114,7 @@ class Portfolio:
                 "price": price,
                 "commission": commission,
                 "pnl": realized_pnl,
+                "buy_date": holding.buy_date,
             }
         )
         return realized_pnl

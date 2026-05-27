@@ -72,9 +72,20 @@ def compute_metrics(
     else:
         sharpe = 0.0
 
-    if trades:
-        wins = sum(1 for t in trades if t.get("pnl", 0) > 0)
-        win_rate = wins / len(trades)
+    # Position-level win rate (group sells by position, not per-event)
+    sell_trades = [t for t in trades if t.get("action") == "sell"]
+    if sell_trades:
+        positions: dict[tuple[str, str], float] = {}
+        for t in sell_trades:
+            key = (t["ts_code"], t.get("buy_date", ""))
+            positions[key] = positions.get(key, 0.0) + t.get("pnl", 0.0)
+        position_wins = sum(1 for pnl in positions.values() if pnl > 0)
+        position_losses = sum(1 for pnl in positions.values() if pnl <= 0)
+        win_rate = (
+            position_wins / (position_wins + position_losses)
+            if (position_wins + position_losses) > 0
+            else 0.0
+        )
     else:
         win_rate = 0.0
 
