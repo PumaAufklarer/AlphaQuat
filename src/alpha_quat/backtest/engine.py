@@ -50,6 +50,7 @@ class BacktestEngine:
         self._last_rebalance_idx: int | None = None
         self._additions: dict[str, float] = {}  # date -> capital added
         self._score_history: dict[str, list[float]] = {}  # stock -> list of scores
+        self._prev_close: dict[str, float] = {}  # T-1 close for stop-loss
 
     def run(self):
         cal_path = self.data_dir / "trade_cal.parquet"
@@ -102,9 +103,10 @@ class BacktestEngine:
             # Update peak prices for dynamic stop-loss
             self.portfolio.update_peak_prices(close_px)
 
-            # Dynamic stop-loss: sell if close < peak_price * (1 - stop_loss_pct)
+            # Trailing stop-loss: sell if T-1 close < peak × (1 − stop_loss_pct)
+            # Execution at today's open (uses yesterday's close to trigger)
             for code, h in list(self.portfolio.holdings.items()):
-                prev_close = close_px.get(code)
+                prev_close = self._prev_close.get(code)
                 if prev_close and prev_close < h.peak_price * (
                     1.0 - self.config.stop_loss_pct
                 ):
@@ -366,6 +368,7 @@ class BacktestEngine:
                 self._pending_signals = self.signal_gen.generate(features, ctx_sig)
 
             self.portfolio.record_snapshot(td, close_px)
+            self._prev_close = close_px  # save for next day's stop-loss trigger
 
         return self._result()
 
