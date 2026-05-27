@@ -272,3 +272,13 @@ Gemini 3.5 analysis of the 10+ failed experiments identified three structural is
 - **Price-triggered execution** — checks daily high/low vs target price. `unfilled_signals` tracks price not met.
 - **Holding.stop_price** — support-level stop loss stored per position. Portfolio.buy() accepts `stop_price=` parameter.
 - **Support predictions are weaker than resistance** — 25% win rate strategy with high-reward tail.
+- **25% win rate is misleading** — counts partial stop-loss fills as separate losing trades. Position-level win rate is ~58% (712 matched buy→sell pairs). The reported win rate penalizes stop-loss strategies that partially exit and then re-enter.
+- **Best trades are in 0-5 yuan bucket**: 266 trades, 67% win rate, +621 avg PnL, +165K total PnL. 10-15 yuan bucket underperforms (36% win rate, negative total PnL).
+- **`--min-price` filter is harmful** — excludes the best-performing low-price bucket. Model's strength is picking cheap stocks with high upside skew.
+- **CLI flags**: `--min-price <float>` (default 0.0), `--quality-filter` (bool), both passed through `BacktestConfig` → `build_universe()` in `filters.py`.
+
+### Strategy characteristics
+- **High skew strategy**: 57.9% of positions win, but winners are 4-5× larger than losers (75th pct=+591 vs 25th pct=-280). Right tail extends to +21,683 max win.
+- **Hold duration matters**: Held ≤5d = 0% win rate (stop-loss kills), held >20d = 68.8% win rate (let trades run).
+- **Model prefers low-price stocks**: All buys in 3-8 yuan range. This is not a bug — KLEN/KMID volatility signals are strongest on cheap stocks, and MV adjustment isn't enough to overcome the KLEN/KMID dominance.
+- **Fundamentals help but don't change character**: MV became #1 feature (gain=1525.8) with fundamentals enabled, but top-k selection still picks cheap volatile stocks due to KLEN/KMID group dominance (~86% of total gain).

@@ -16,7 +16,10 @@ _INDUSTRY_MAP: dict[str, str] | None = None
 
 
 def build_universe(
-    trade_date: str, data_dir: Path, quality_filter: bool = False
+    trade_date: str,
+    data_dir: Path,
+    quality_filter: bool = False,
+    min_price: float = 0.0,
 ) -> set[str]:
     global _INDUSTRY_MAP
     if _INDUSTRY_MAP is None:
@@ -31,8 +34,17 @@ def build_universe(
         st = pd.read_parquet(st_path)
         main_board -= set(st["ts_code"])
 
+    universe = main_board
+
+    if min_price > 0:
+        daily_path = data_dir / "daily" / f"{_date_to_path(trade_date)}.parquet"
+        if daily_path.exists():
+            daily = pd.read_parquet(daily_path)
+            high_price_stocks = set(daily.loc[daily["high"] >= min_price, "ts_code"])
+            universe &= high_price_stocks
+
     if not quality_filter:
-        return main_board
+        return universe
 
     # Quality filter: industry-relative PE/PB + market cap + liquidity
     db_path = data_dir / "daily_basic" / f"{_date_to_path(trade_date)}.parquet"
@@ -60,4 +72,5 @@ def build_universe(
         & (db["pb"] >= ind_pb * 0.1)
     )
     quality_set = set(db.loc[mask, "ts_code"])
-    return main_board & quality_set
+    universe &= quality_set
+    return universe

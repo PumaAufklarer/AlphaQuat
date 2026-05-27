@@ -27,28 +27,27 @@ uv run alpha-quat model lightgbm \
   --no-tune --quantile
 ```
 
-## Backtest (Best Config)
+## Backtest (Best Config — Lambdarank + Fundamentals)
 
 ```bash
 uv run alpha-quat backtest \
-  --start 20220401 --end 20260330 \
+  --experiment exp_lr_v4 \
+  --start 20220501 --end 20260501 \
   --capital 50000 --monthly 8000 \
-  --top-k 5 --rebalance-interval 10 \
-  --sell-threshold 0.40
+  --top-k 15 --rebalance-interval 5 \
+  --stop-loss 0.10 --weighting score_momentum
 ```
 
 Key parameters:
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--rebalance-interval` | `5` | Trading days between rebalances (5=weekly, 10=bi-weekly) |
-| `--sell-threshold` | `0.40` | Sell stocks outside Top-K only if score < threshold |
-| `--daily-monitor` | — | Continuous daily mode (sell weak, buy best) |
-| `--sell-score-percentile` | — | Sell holdings scoring below this percentile |
-| `--stop-loss` | `0.15` | Dynamic stop-loss from peak price |
-| `--top-k` | `5` | Max holdings |
-| `--monthly` | `8000` | Monthly capital addition |
-| `--weighting` | `equal` | Position sizing: equal, kelly, vol_parity, score_momentum |
-| `--quantile` | — | Train quantile regression (9 models) instead of point estimates |
+| `--experiment` | — | Experiment name for ML signal |
+| `--rebalance-interval` | `5` | Trading days between rebalances |
+| `--stop-loss` | `0.10` | Dynamic stop-loss from peak price |
+| `--top-k` | `15` | Max holdings |
+| `--weighting` | `score_momentum` | Position sizing: equal, kelly, vol_parity, score_momentum |
+| `--quality-filter` | — | Apply PE/PB industry-relative quality screen |
+| `--min-price` | `0.0` | Minimum stock price (exclude pennies — harmful, don't use) |
 
 ## Model Training
 
@@ -116,7 +115,29 @@ src/alpha_quat/
 └── backtest/           # Backtesting engine + metrics + report
 ```
 
-## OOS Best Result
+## OOS Results
+
+### Lambdarank + Fundamentals (2026-05)
+
+```
+Period:      2022-05 ~ 2026-05 (4 year out-of-sample)
+Capital:     ¥50,000 + ¥8,000/month
+Strategy:    LightGBM lambdarank, 206 features incl. fundamentals, score_momentum weighting
+Return:      +59.27% (cumulative), +12.87% (annualized)
+Sharpe:      1.09
+Max DD:      -18.24%
+Trades:      1431
+Win Rate:    28.8% (per-event) / 57.9% (per-position)
+```
+
+Key findings:
+- **Fundamentals (MV, PE, PB, ROE, MACD, RSI) added +0.28 Sharpe** vs Alpha158-only baseline
+- **Model picks 3-8 yuan cheap stocks** despite MV preference for large caps — KLEN/KMID volatility signals dominate
+- **0-5 yuan bucket**: 67% win rate, +165K total PnL — model's sweet spot
+- **25-29% win rate is misleading** — counts partial stop-loss fills. Real position-level win rate is ~58%
+- **Quality post-filter hurt Sharpe** (1.09 → 0.93) — model already learns fundamental preference internally
+
+### Quantile Regression (2025 reference)
 
 ```
 Period:      2022-04 ~ 2026-03 (4 year out-of-sample)

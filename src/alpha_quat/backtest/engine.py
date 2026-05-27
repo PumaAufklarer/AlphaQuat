@@ -99,7 +99,10 @@ class BacktestEngine:
             open_px = dict(zip(daily["ts_code"], daily["open"]))
             close_px = dict(zip(daily["ts_code"], daily["close"]))
             universe = build_universe(
-                td, self.data_dir, quality_filter=self.config.quality_filter
+                td,
+                self.data_dir,
+                quality_filter=self.config.quality_filter,
+                min_price=self.config.min_price,
             )
 
             # Update peak prices for dynamic stop-loss

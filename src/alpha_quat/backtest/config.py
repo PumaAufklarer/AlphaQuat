@@ -28,3 +28,4 @@ class BacktestConfig:
     sell_upper_threshold: float = 0.35
     weighting_strategy: str = "equal"  # equal|vol_parity|score_momentum|kelly
     quality_filter: bool = False  # apply industry-relative PE/PB quality screen
+    min_price: float = 0.0  # minimum stock price (exclude pennies)

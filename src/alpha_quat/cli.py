@@ -134,6 +134,12 @@ def _build_backtest_parser(subparsers):
         help="Apply PE/PB industry-relative quality filter",
     )
     parser.add_argument(
+        "--min-price",
+        type=float,
+        default=0.0,
+        help="Minimum stock price (exclude penny stocks)",
+    )
+    parser.add_argument(
         "--experiment", default=None, help="Experiment name for ML signal"
     )
     return parser
@@ -264,6 +270,7 @@ def _cmd_backtest(args, config):
         sell_upper_threshold=args.sell_upper,
         weighting_strategy=args.weighting,
         quality_filter=args.quality_filter,
+        min_price=args.min_price,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()
