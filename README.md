@@ -1,6 +1,6 @@
 # AlphaQuat
 
-A quantitative stock selection framework for A-shares. Pulls Chinese market data via Tushare, computes 200+ technical factors (Qlib Alpha158), trains LightGBM quantile regression models to predict future price channel position, backtests strategies, and provides daily scoring.
+A quantitative stock trading framework for A-shares. Pulls Chinese market data via Tushare, computes 200+ technical factors (Qlib Alpha158), trains LightGBM quantile regression / lambdarank models, and backtests strategies. Also includes experimental SR Transformer, Keltner regime, and RL agent models.
 
 ## Workflow
 
@@ -106,7 +106,11 @@ src/alpha_quat/
 ├── features/           # Factor computation engine (DuckDB)
 │   └── alphasets/      # Factor set definitions (alpha158/ext/fund)
 ├── model/              # ML model (dataset, train, evaluate, meta, predict, rolling)
-│   └── lightgbm/       # LightGBM implementation
+│   ├── lightgbm/       # LightGBM — regression, quantile, lambdarank
+│   └── nn/             # Neural networks (experimental)
+│       ├── transformer/    # StockTransformer — SR price prediction
+│       ├── keltner/        # Keltner Channel regime prediction
+│       └── rl_agent/       # REINFORCE position control agent
 ├── strategy/           # Signal generators + position managers
 └── backtest/           # Backtesting engine + metrics + report
 ```

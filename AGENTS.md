@@ -35,22 +35,58 @@ Each variant is a separate file inheriting from `LightGBMBasePipeline(ABC)`, reg
 
 ### Neural network (`model/nn/`)
 
-Current variant: `sr_transformer` — predicts support/resistance probability distributions.
+Three variants: `sr_transformer` (legacy production), `keltner` (regime classification, experimental), `rl_agent` (RL position control, experimental).
+
+#### SR Transformer (`model/nn/transformer/`)
+
+Predicts support/resistance probability distributions from 60-day sequences.
+
+**Input:** 17 features [6 OHLCV + 8 derived + 3 Keltner], per-sequence normalized.
 
 | Module | Purpose |
 |--------|---------|
-| `transformer/labels.py` | SR label generation (local peak/trough detection) |
-| `transformer/models/transformer.py` | `StockTransformer` — 4-layer TransformerEncoder |
-| `transformer/models/dataset.py` | `SRSequenceDataset` — per-sequence normalization (price ratios + log volume) |
-| `transformer/train.py` | AdamW + warmup-cosine + grad clipping + label smoothing |
-| `transformer/evaluate.py` | Per-horizon loss, top-3 bin accuracy |
-| `transformer/inference.py` | `SRInference` — `predict_batch()` for GPU-batched inference |
+| `models/transformer.py` | `StockTransformer` — 4-layer TransformerEncoder |
+| `models/dataset.py` | `SRSequenceDataset` — per-sequence normalization (price ratios + log volume + per-seq z-score for derived features) |
+| `train.py` | AdamW + warmup-cosine + grad clipping + label smoothing |
+| `evaluate.py` | Per-horizon loss, top-3 bin accuracy, peak detection, price-top3-given-peak |
+| `inference.py` | `SRInference` — batch GPU inference + entry/exit signals |
 
-**Per-sequence normalization** — each (60, 6) sequence normalized independently:
-- Price features (O/H/L/C/VWAP): `value / close[-1] - 1` → ratio relative to last close
-- Volume: `log(1+vol) → z-score` (global stats from training set)
+**Labels:** 100 price bins + 1 "no peak" bin (= 101 bins). `CrossEntropyLoss` with `label_smoothing=0.1`. `w = 1/(1 + dist/5)` for price bins, `w = 1.0` for "no peak" bin.
 
-**Labels:** class indices (int64, not one-hot). `CrossEntropyLoss` with `label_smoothing=0.1`. Invalid horizons masked via float weight `w = 1/(1 + dist/5)` where dist = days to nearest peak.
+**Status:** Not effective. Support/resistance are inherently historical, not predictive.
+
+#### Keltner Regime Model (`model/nn/keltner/`)
+
+Predicts market regime (ranging/support_test/resistance_test/breakout_up/breakout_down) from 14 OHLCV-derived features (Keltner channel NOT in input).
+
+**Status:** Abandoned. Model learned to read Keltner position from features (circular), not market structure. 55% accuracy was auto-correlation, not prediction.
+
+#### RL Agent (`model/nn/rl_agent/`)
+
+Per-stock continuous position control [-1, 1] via REINFORCE.
+
+| Module | Purpose |
+|--------|---------|
+| `models/position_agent.py` | `PositionAgent` — same encoder + Gaussian policy head |
+| `pretrain.py` | Supervised direction-prediction pre-training (accuracy 55% val, overfits) |
+| `train.py` | REINFORCE with cross-sectional normalization, per-stock baseline, informative-day filtering |
+| `evaluate.py` | Multi-horizon Sharpe (5d+20d) on held-out stocks |
+| `rank_model.py` | Cross-sectional pairwise ranking loss (Spearman=0) |
+| `variants/rl_agent_variant.py` | Two-phase pipeline: pretrain → RL |
+
+**Key limiting factor:** 14 OHLCV-derived features don't have enough signal for per-stock RL. LightGBM lambdarank succeeds because it uses 158+ cross-sectional features (Alpha158).
+
+**Experiments:**
+| Experiment | Method | Result |
+|-----------|--------|--------|
+| exp_agent_v1 | REINFORCE raw reward, global baseline | Sharpe stuck at ±0.464 |
+| exp_agent_v2 | + per-stock baseline + informative filter | Same |
+| exp_agent_v3 | + cross-sectional normalization | Same |
+| exp_agent_v4 | + sign(reward) advantage | Same |
+| exp_agent_v5 | + supervised pretrain | Val acc 55%, RL same |
+| exp_rank_v1 | Cross-sectional ranking (pairwise loss) | Spearman ≈ 0 |
+
+**Lesson learned:** Per-stock OHLCV features are insufficient for RL trading agents. The cross-sectional Alpha158 factor set (158+ factors with rank/quantile/industry) is what makes LightGBM effective. Transformer-based approaches need either more informative features or a cross-sectional training setup.
 
 ### Architecture: experiment system (`src/alpha_quat/experiment/`)
 
@@ -70,6 +106,11 @@ Algorithm per stock:
 2. Verify rejection/bounce within 3 days (0.5% threshold)
 3. Reverse-fill nearest verified peak via deque (O(n) per horizon)
 4. Per-horizon neighborhoods: 5d=±2, 20d=±10, 60d=±30
+
+**Added features (2026-05):**
+- 8 derived features: `volume_ratio`, `turnover_rate`, `hl_ratio`, `ret_5d`, `close_ma20`, `atr_ratio`, `vol_change`, `amt_change`
+- 3 Keltner Channel features: `keltner_pos`, `keltner_width`, `keltner_above_ema`
+- Total: 6 raw + 8 derived + 3 Keltner = **17 features** per stock per day
 
 ## Architecture: backtesting
 
@@ -111,6 +152,12 @@ uv run alpha-quat sr-cache                                            # precompu
 uv run alpha-quat model nn sr_transformer --name exp_sr_v1            # train
 uv run alpha-quat model nn sr_transformer --name tune --tune          # grid search
 
+# Keltner Regime (experimental)
+uv run alpha-quat model nn keltner --name exp_keltner_v1
+
+# RL Agent (experimental — does not learn effectively)
+uv run alpha-quat model nn rl_agent --name exp_agent_v5
+
 # Backtest
 uv run alpha-quat backtest --experiment exp_quantile_v1               # LightGBM ranking bt
 uv run alpha-quat backtest-sr --experiment exp_sr_v1 --start 20240101 # SR entry/exit bt
@@ -132,7 +179,7 @@ data/
 ├── trade_cal.parquet
 ├── stock_st/YYYY_MM_DD.parquet
 ├── features/YYYYMMDD.parquet     # alpha158 factor files (no dashes)
-├── alpha360/YYYYMMDD.parquet     # SR cache: 6 price+volume + 12 SR columns
+├── alpha360/YYYYMMDD.parquet     # SR cache: 17 features + 12 SR columns
 └── models/
     ├── experiments/<name>/       # named experiment directory
     │   ├── experiment.yaml       # full config snapshot
@@ -156,6 +203,15 @@ data/
 - **`stride` default = 10** — stride=30 was too aggressive, not enough near-term samples.
 - **per-sequence normalization** — divide by last close, not global z-score. This removed stock-specific shortcuts.
 - **batch inference** — `SRInference.predict_batch()` runs one forward pass for all stocks, not per-stock loops.
+
+### RL / Neural models
+- **14 OHLCV features insufficient** — RL agents and ranking models fail to learn from 14 features alone.
+  LightGBM lambdarank succeeds because of its 158+ cross-sectional Alpha158 features (rank/quantile/industry).
+- **Per-stock RL doesn't work** — REINFORCE with continuous positions (-1, 1) produces constant-bias policies
+  (Sharpe stuck at ±0.464). The signal-to-noise ratio in individual stock returns is too low.
+- **"No peak" bin (bin 100)** — improves SR label quality but doesn't fix the fundamental issue.
+- **Keltner features are leaky** — including keltner features as model inputs creates circular learning
+  (model predicts channel position from channel position). Use for dataset curation only.
 
 ### Backtest
 - **SR backtest (`backtest-sr`) is separate** from `engine.py`. Do not add SR if/else to `engine.py`.
