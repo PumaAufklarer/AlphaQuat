@@ -9,7 +9,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Features consistently zero-gain across all models — excluded by default
+# Redundant high-index KLEN/KMID variants — zero-gain from previous experiments
 _ZERO_GAIN_FEATURES = {
     "KMID94",
     "KMID95",
@@ -26,21 +26,6 @@ _ZERO_GAIN_FEATURES = {
     "KMID100",
     "KLEN100",
     "KMID101",
-    "O2C",
-    "DRP",
-    "HLC",
-    "pe_ttm",
-    "pb",
-    "ROE_RAW",
-    "ROE",
-    "MV",
-    "VOLRATIO",
-    "EMA12C",
-    "EMA26C",
-    "MACD",
-    "RSI14",
-    "SLOPE5",
-    "SLOPE20",
 }
 
 

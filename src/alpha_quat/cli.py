@@ -129,6 +129,11 @@ def _build_backtest_parser(subparsers):
         help="Position sizing strategy (default: equal)",
     )
     parser.add_argument(
+        "--quality-filter",
+        action="store_true",
+        help="Apply PE/PB industry-relative quality filter",
+    )
+    parser.add_argument(
         "--experiment", default=None, help="Experiment name for ML signal"
     )
     return parser
@@ -258,6 +263,7 @@ def _cmd_backtest(args, config):
         confidence_threshold=args.confidence_threshold,
         sell_upper_threshold=args.sell_upper,
         weighting_strategy=args.weighting,
+        quality_filter=args.quality_filter,
     )
     engine = BacktestEngine(cfg, config.data_dir)
     result = engine.run()

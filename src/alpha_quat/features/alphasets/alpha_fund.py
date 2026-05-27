@@ -40,6 +40,11 @@ _FACTORS = [
         category="fundamental",
     ),
     Factor(
+        name="TURN_RANK",
+        expression="RANK($turnover_rate)",
+        category="fundamental",
+    ),
+    Factor(
         name="VOLRATIO",
         expression="$volume_ratio",
         category="fundamental",

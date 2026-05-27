@@ -98,7 +98,9 @@ class BacktestEngine:
             daily = pd.read_parquet(daily_path)
             open_px = dict(zip(daily["ts_code"], daily["open"]))
             close_px = dict(zip(daily["ts_code"], daily["close"]))
-            universe = build_universe(td, self.data_dir)
+            universe = build_universe(
+                td, self.data_dir, quality_filter=self.config.quality_filter
+            )
 
             # Update peak prices for dynamic stop-loss
             self.portfolio.update_peak_prices(close_px)

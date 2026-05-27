@@ -21,21 +21,6 @@ _ZERO_GAIN = {
     "KMID100",
     "KLEN100",
     "KMID101",
-    "O2C",
-    "DRP",
-    "HLC",
-    "pe_ttm",
-    "pb",
-    "ROE_RAW",
-    "ROE",
-    "MV",
-    "VOLRATIO",
-    "EMA12C",
-    "EMA26C",
-    "MACD",
-    "RSI14",
-    "SLOPE5",
-    "SLOPE20",
 }
 
 
