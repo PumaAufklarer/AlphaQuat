@@ -26,7 +26,7 @@ class QuantileSignal(BaseMLSignal):
         return models
 
     def generate(self, features: pd.DataFrame, ctx: StrategyContext) -> SignalResult:
-        X = self._prepare_features(features)
+        X, feats = self._prepare_features(features)
         n = len(X)
         score = np.zeros(n)
         extra_low = np.zeros(n)
@@ -45,7 +45,7 @@ class QuantileSignal(BaseMLSignal):
                     self.models[high_key].predict(X), dtype=float
                 )
         ci = (extra_high - extra_low) / 2
-        df = features[["ts_code"]].copy()
+        df = feats[["ts_code"]].copy()
         df["score"] = score
         df["action"] = "buy"
         return SignalResult(

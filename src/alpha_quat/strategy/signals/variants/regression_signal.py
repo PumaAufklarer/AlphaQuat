@@ -23,9 +23,9 @@ class RegressionSignal(BaseMLSignal):
         return models
 
     def generate(self, features: pd.DataFrame, ctx: StrategyContext) -> SignalResult:
-        X = self._prepare_features(features)
+        X, feats = self._prepare_features(features)
         score = sum(self._WEIGHTS[h] * self.models[h].predict(X) for h in self.models)
-        df = features[["ts_code"]].copy()
+        df = feats[["ts_code"]].copy()
         df["score"] = score
         df["action"] = "buy"
         return SignalResult(signals=df, metadata={"model": "ml_ensemble"})

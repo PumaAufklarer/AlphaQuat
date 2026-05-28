@@ -55,7 +55,9 @@ class BaseMLSignal(ABC):
         self, features: pd.DataFrame, ctx: StrategyContext
     ) -> SignalResult: ...
 
-    def _prepare_features(self, features: pd.DataFrame) -> pd.DataFrame:
+    def _prepare_features(
+        self, features: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         factor_cols = [
             c
             for c in features.columns
@@ -152,5 +154,17 @@ class BaseMLSignal(ABC):
             )
 
         result = result.fillna(0)
+
+        # --- Risk-free rate baseline: 0.5 on all features, model ranks it ---
+        rfr_row = {c: 0.5 for c in result.columns}
+        rfr_df = pd.DataFrame([rfr_row])
+        result = pd.concat([result, rfr_df], ignore_index=True)
+        # Extend features DataFrame's ts_code for the signal generator
+        if "ts_code" in features.columns:
+            features = features.copy()
+            features = pd.concat(
+                [features, pd.DataFrame({"ts_code": ["__RFR__"]})], ignore_index=True
+            )
+
         assert isinstance(result, pd.DataFrame)
-        return result
+        return result, features

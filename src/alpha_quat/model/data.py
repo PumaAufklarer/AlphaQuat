@@ -190,7 +190,7 @@ class DatasetBuilder:
                 CAST(NTILE({n_tile}) OVER (PARTITION BY trade_date ORDER BY ret_60d) - 1 AS INTEGER) AS y60
               FROM labeled
             )
-            SELECT ts_code, trade_date, y5, y20, y60, {factor_select}
+            SELECT ts_code, trade_date, y5, y20, y60, ret_5d, ret_20d, ret_60d, {factor_select}
             FROM final
             WHERE y5 >= 0 AND y20 >= 0 AND y60 >= 0
             ORDER BY trade_date
@@ -281,6 +281,42 @@ class DatasetBuilder:
 
         # --- Cross-sectional rank: transform all features to [0,1] percentile ---
         merged[factor_cols] = merged.groupby("trade_date")[factor_cols].rank(pct=True)
+
+        # --- Risk-free rate as synthetic baseline asset ---
+        # Annualized 2% (China 10Y govt bond proxy). Model learns to rank it
+        # against stocks; if RFR ranks in top-K, it signals a bear market.
+        if lambdarank and "ret_5d" in merged.columns:
+            RFR_ANNUAL = 0.02
+            rfr_5d = RFR_ANNUAL * 5 / 252
+            rfr_20d = RFR_ANNUAL * 20 / 252
+            rfr_60d = RFR_ANNUAL * 60 / 252
+
+            rfr_rows = []
+            for td in sorted(merged["trade_date"].unique()):
+                td_mask = merged["trade_date"] == td
+                td_rets = merged.loc[td_mask, ["ret_5d", "ret_20d", "ret_60d"]]
+
+                # Where does RFR rank in this date's cross-section?
+                y5 = int((td_rets["ret_5d"] <= rfr_5d).mean() * n_tile)
+                y20 = int((td_rets["ret_20d"] <= rfr_20d).mean() * n_tile)
+                y60 = int((td_rets["ret_60d"] <= rfr_60d).mean() * n_tile)
+
+                row = {
+                    c: 0.5 for c in factor_cols
+                }  # neutral (median) on all dimensions
+                row["ts_code"] = "__RFR__"
+                row["trade_date"] = td
+                row["y5"] = min(y5, n_tile - 1)
+                row["y20"] = min(y20, n_tile - 1)
+                row["y60"] = min(y60, n_tile - 1)
+                rfr_rows.append(row)
+
+            rfr_df = pd.DataFrame(rfr_rows)
+            merged = pd.concat([merged, rfr_df], ignore_index=True)
+            # Drop raw return columns (no longer needed after RFR label computation)
+            merged.drop(
+                columns=["ret_5d", "ret_20d", "ret_60d"], inplace=True, errors="ignore"
+            )
 
         # --- Purge/embargo: prevent label leakage at train/val boundary ---
         # Labels look forward up to max_offset (60) trading days. Samples near
