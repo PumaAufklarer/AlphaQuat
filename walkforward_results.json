@@ -1,0 +1,104 @@
+[
+  {
+    "window": 0,
+    "train": "20180102~20211231",
+    "test": "20220301~20230301",
+    "sharpe": 1.4811,
+    "cum_ret": 0.2261,
+    "annual_ret": 0.2343,
+    "max_dd": -0.1408,
+    "win_rate": 0.6437,
+    "trades": 183
+  },
+  {
+    "window": 1,
+    "train": "20180702~20220701",
+    "test": "20220901~20230901",
+    "sharpe": 0.7413,
+    "cum_ret": 0.0736,
+    "annual_ret": 0.0761,
+    "max_dd": -0.0709,
+    "win_rate": 0.6042,
+    "trades": 200
+  },
+  {
+    "window": 2,
+    "train": "20190102~20221230",
+    "test": "20230301~20240301",
+    "sharpe": -0.7528,
+    "cum_ret": -0.1267,
+    "annual_ret": -0.1306,
+    "max_dd": -0.2414,
+    "win_rate": 0.5195,
+    "trades": 519
+  },
+  {
+    "window": 3,
+    "train": "20190701~20230630",
+    "test": "20230901~20240830",
+    "sharpe": 0.2638,
+    "cum_ret": 0.0386,
+    "annual_ret": 0.0402,
+    "max_dd": -0.2107,
+    "win_rate": 0.5467,
+    "trades": 306
+  },
+  {
+    "window": 4,
+    "train": "20200102~20231229",
+    "test": "20240301~20250228",
+    "sharpe": 0.8988,
+    "cum_ret": 0.1967,
+    "annual_ret": 0.2066,
+    "max_dd": -0.1242,
+    "win_rate": 0.6625,
+    "trades": 169
+  },
+  {
+    "window": 5,
+    "train": "20200701~20240701",
+    "test": "20240902~20250901",
+    "sharpe": 3.3308,
+    "cum_ret": 0.4416,
+    "annual_ret": 0.4635,
+    "max_dd": -0.0666,
+    "win_rate": 0.7025,
+    "trades": 325
+  },
+  {
+    "window": 6,
+    "train": "20210104~20241231",
+    "test": "20250303~20260227",
+    "sharpe": 1.998,
+    "cum_ret": 0.2247,
+    "annual_ret": 0.2361,
+    "max_dd": -0.0693,
+    "win_rate": 0.6692,
+    "trades": 268
+  },
+  {
+    "window": 7,
+    "train": "20210701~20250701",
+    "test": "20250901~20260901",
+    "sharpe": 0.082,
+    "cum_ret": -0.2324,
+    "annual_ret": -0.3197,
+    "max_dd": -0.0912,
+    "win_rate": 0.6154,
+    "trades": 164
+  },
+  {
+    "train_start": "20220104",
+    "train_end": "20251231",
+    "test_start": "20260302",
+    "test_end": "20261231",
+    "error": "Input data must be 2 dimensional and non empty."
+  },
+  {
+    "train_start": "20220701",
+    "train_end": "20260701",
+    "test_start": "20260901",
+    "test_end": "20261231",
+    "error": "Input data must be 2 dimensional and non empty."
+  }
+]

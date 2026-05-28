@@ -228,6 +228,57 @@ class DatasetBuilder:
                 merged[f"{f}_ind"] = merged[f] / (ind_median + 1e-8)
                 factor_cols.append(f"{f}_ind")
 
+        # --- Holder number features (shareholder concentration) ---
+        # Each stock uses its own latest available quarter (ann_date ≤ trade_date).
+        holder_dir = self.data_dir / "holdernumber"
+        if holder_dir.exists():
+            holder_files = list(holder_dir.glob("*.parquet"))
+            if holder_files:
+                # Build per-stock: {ts_code: [(ann_date_int, holder_num, prev_holder_num), ...]}
+                holder_lookup: dict[str, list[tuple[int, float, float]]] = {}
+                for hf in holder_files:
+                    code = hf.stem
+                    hdf = pd.read_parquet(hf, columns=["ann_date", "holder_num"])
+                    hdf = hdf.sort_values("ann_date")
+                    entries = []
+                    prev = float("nan")
+                    for _, row in hdf.iterrows():
+                        hn = float(row["holder_num"])
+                        entries.append((int(row["ann_date"]), hn, prev))
+                        prev = hn
+                    if entries:
+                        holder_lookup[code] = entries
+
+                codes = merged["ts_code"].values
+                td_ints = merged["trade_date"].astype(int).values
+                hnums = np.full(len(merged), np.nan)
+                hnums_prev = np.full(len(merged), np.nan)
+
+                for i in range(len(merged)):
+                    entries = holder_lookup.get(str(codes[i]))
+                    if entries:
+                        td = td_ints[i]
+                        best = None
+                        for ann, hn, hp in entries:
+                            if ann <= td:
+                                best = (hn, hp)
+                            else:
+                                break
+                        if best:
+                            hnums[i] = best[0]
+                            hnums_prev[i] = best[1]
+
+                merged["holder_num"] = hnums
+                merged["holder_num_qoq"] = np.where(
+                    ~np.isnan(hnums_prev) & (hnums_prev != 0),
+                    (hnums - hnums_prev) / hnums_prev,
+                    0.0,
+                )
+                merged["holder_num_qoq"] = merged["holder_num_qoq"].clip(-0.5, 0.5)
+
+                for f in ["holder_num", "holder_num_qoq"]:
+                    factor_cols.append(f)
+
         # --- Cross-sectional rank: transform all features to [0,1] percentile ---
         merged[factor_cols] = merged.groupby("trade_date")[factor_cols].rank(pct=True)
 
