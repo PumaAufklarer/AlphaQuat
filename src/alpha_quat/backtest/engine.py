@@ -209,6 +209,20 @@ class BacktestEngine:
             features = pd.read_parquet(feat_path)
             features = features.loc[features["ts_code"].isin(list(universe))]
 
+            # Add backward returns from close history (needed for industry momentum)
+            if self._close_history:
+                codes = features["ts_code"].values
+                ret5 = np.full(len(features), np.nan)
+                ret20 = np.full(len(features), np.nan)
+                for i, code in enumerate(codes):
+                    hist = self._close_history.get(code, [])
+                    if len(hist) > 5:
+                        ret5[i] = hist[-1] / hist[-6] - 1
+                    if len(hist) > 20:
+                        ret20[i] = hist[-1] / hist[-21] - 1
+                features["ret_back_5"] = ret5
+                features["ret_back_20"] = ret20
+
             if self.config.model_dir or self.config.experiment_name:
                 if self.config.daily_monitor:
                     ctx_sig = StrategyContext(

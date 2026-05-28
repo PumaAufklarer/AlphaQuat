@@ -149,7 +149,9 @@ class DatasetBuilder:
                    MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 5 FOLLOWING) AS min_low_5,
                    MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 5 FOLLOWING) AS max_high_5,
                    MIN(low) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS min_low_20,
-                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS max_high_20
+                   MAX(high) OVER (w ROWS BETWEEN CURRENT ROW AND 20 FOLLOWING) AS max_high_20,
+                   close / NULLIF(LAG(close, 5) OVER w, 0) - 1 AS ret_back_5,
+                   close / NULLIF(LAG(close, 20) OVER w, 0) - 1 AS ret_back_20
             FROM daily
             WINDOW w AS (PARTITION BY ts_code ORDER BY trade_date)
         ),
@@ -170,7 +172,9 @@ class DatasetBuilder:
             SELECT b.*,
                    (dw.close_5 - dw.min_low_5) / NULLIF(dw.max_high_5 - dw.min_low_5, 0) AS ret_5d,
                    (dw.close_20 - dw.min_low_20) / NULLIF(dw.max_high_20 - dw.min_low_20, 0) AS ret_20d,
-                   dw.close_60 / NULLIF(dw.close, 0) - 1 AS ret_60d
+                   dw.close_60 / NULLIF(dw.close, 0) - 1 AS ret_60d,
+                   dw.ret_back_5,
+                   dw.ret_back_20
             FROM base b
             LEFT JOIN daily_win dw ON b.ts_code = dw.ts_code AND b.trade_date = dw.trade_date
             WHERE dw.close_5 IS NOT NULL
@@ -190,7 +194,7 @@ class DatasetBuilder:
                 CAST(NTILE({n_tile}) OVER (PARTITION BY trade_date ORDER BY ret_60d) - 1 AS INTEGER) AS y60
               FROM labeled
             )
-            SELECT ts_code, trade_date, y5, y20, y60, ret_5d, ret_20d, ret_60d, {factor_select}
+            SELECT ts_code, trade_date, y5, y20, y60, ret_5d, ret_20d, ret_60d, ret_back_5, ret_back_20, {factor_select}
             FROM final
             WHERE y5 >= 0 AND y20 >= 0 AND y60 >= 0
             ORDER BY trade_date
@@ -228,56 +232,16 @@ class DatasetBuilder:
                 merged[f"{f}_ind"] = merged[f] / (ind_median + 1e-8)
                 factor_cols.append(f"{f}_ind")
 
-        # --- Holder number features (shareholder concentration) ---
-        # Each stock uses its own latest available quarter (ann_date ≤ trade_date).
-        holder_dir = self.data_dir / "holdernumber"
-        if holder_dir.exists():
-            holder_files = list(holder_dir.glob("*.parquet"))
-            if holder_files:
-                # Build per-stock: {ts_code: [(ann_date_int, holder_num, prev_holder_num), ...]}
-                holder_lookup: dict[str, list[tuple[int, float, float]]] = {}
-                for hf in holder_files:
-                    code = hf.stem
-                    hdf = pd.read_parquet(hf, columns=["ann_date", "holder_num"])
-                    hdf = hdf.sort_values("ann_date")
-                    entries = []
-                    prev = float("nan")
-                    for _, row in hdf.iterrows():
-                        hn = float(row["holder_num"])
-                        entries.append((int(row["ann_date"]), hn, prev))
-                        prev = hn
-                    if entries:
-                        holder_lookup[code] = entries
-
-                codes = merged["ts_code"].values
-                td_ints = merged["trade_date"].astype(int).values
-                hnums = np.full(len(merged), np.nan)
-                hnums_prev = np.full(len(merged), np.nan)
-
-                for i in range(len(merged)):
-                    entries = holder_lookup.get(str(codes[i]))
-                    if entries:
-                        td = td_ints[i]
-                        best = None
-                        for ann, hn, hp in entries:
-                            if ann <= td:
-                                best = (hn, hp)
-                            else:
-                                break
-                        if best:
-                            hnums[i] = best[0]
-                            hnums_prev[i] = best[1]
-
-                merged["holder_num"] = hnums
-                merged["holder_num_qoq"] = np.where(
-                    ~np.isnan(hnums_prev) & (hnums_prev != 0),
-                    (hnums - hnums_prev) / hnums_prev,
-                    0.0,
-                )
-                merged["holder_num_qoq"] = merged["holder_num_qoq"].clip(-0.5, 0.5)
-
-                for f in ["holder_num", "holder_num_qoq"]:
-                    factor_cols.append(f)
+        # --- Industry momentum: median backward return per industry+date ---
+        if "ret_back_5" in merged.columns:
+            for w, wname in [(5, "ret_back_5"), (20, "ret_back_20")]:
+                merged[f"ind_mom_{w}d"] = merged.groupby(
+                    ["trade_date", "industry"], observed=False
+                )[wname].transform("median")
+                factor_cols.append(f"ind_mom_{w}d")
+            merged.drop(
+                columns=["ret_back_5", "ret_back_20"], errors="ignore", inplace=True
+            )
 
         # --- Cross-sectional rank: transform all features to [0,1] percentile ---
         merged[factor_cols] = merged.groupby("trade_date")[factor_cols].rank(pct=True)
