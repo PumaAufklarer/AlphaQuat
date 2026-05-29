@@ -15,7 +15,9 @@ class BacktestConfig:
     top_k: int = 5
     benchmark: str | None = None
     experiment_name: str | None = None  # replaces model_dir for named experiments
-    model_dir: str | None = None  # kept for backward compatibility
+    model_dir: str | None = (
+        None  # DEPRECATED: use experiment_name instead — will be removed
+    )
     rebalance_interval: int = 5  # trading days between rebalances
     sell_threshold: float | None = (
         0.40  # None=sell all out-of-top-K; 0.40=only if score<0.40

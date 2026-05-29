@@ -61,7 +61,7 @@ def _load_recent_alpha360(
 class TransformerSRSignal(BaseMLSignal):
     mode = "transformer_sr"
 
-    def __init__(self, model_dir: Path, data_dir: Path | None = None):
+    def __init__(self, model_dir: Path, data_dir: Path | None = None) -> None:
         self.model_dir = Path(model_dir)
         self.models = {}
         self.inference = SRInference(self.model_dir)

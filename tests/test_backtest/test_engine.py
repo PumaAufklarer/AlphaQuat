@@ -49,6 +49,7 @@ def _make_minimal_data(data_dir, dates):
             "ts_code": ["000001.SZ", "000002.SZ"],
             "market": ["主板", "主板"],
             "list_status": ["L", "L"],
+            "industry": ["银行", "证券"],
         }
     )
     sb.to_parquet(data_dir / "stock_basic.parquet")

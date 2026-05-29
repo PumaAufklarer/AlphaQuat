@@ -5,7 +5,7 @@ from alpha_quat.strategy.signal import ISignalGenerator
 
 
 class MACrossSignal(ISignalGenerator):
-    def __init__(self, short_factor="KLEN35", long_factor="KLEN36"):
+    def __init__(self, short_factor="KLEN35", long_factor="KLEN36") -> None:
         self.short_factor = short_factor
         self.long_factor = long_factor
         self._prev: pd.DataFrame | None = None

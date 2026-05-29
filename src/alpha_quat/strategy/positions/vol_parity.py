@@ -19,7 +19,7 @@ class VolParityPositionManager(IPositionManager):
         vol_window: int = 20,
         max_weight: float = 0.25,
         min_vol: float = 0.10,
-    ):
+    ) -> None:
         self.top_k = top_k
         self.vol_window = vol_window
         self.max_weight = max_weight

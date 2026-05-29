@@ -15,6 +15,7 @@ class TestBuildUniverse:
                     "ts_code": ["000001.SZ", "000002.SZ", "000003.SZ"],
                     "market": ["主板", "主板", "主板"],
                     "list_status": ["L", "L", "L"],
+                    "industry": ["银行", "银行", "证券"],
                 }
             )
             sb.to_parquet(data_dir / "stock_basic.parquet")
@@ -35,6 +36,7 @@ class TestBuildUniverse:
                     "ts_code": ["000001.SZ", "300001.SZ", "688001.SH"],
                     "market": ["主板", "创业板", "科创板"],
                     "list_status": ["L", "L", "L"],
+                    "industry": ["银行", "科技", "科技"],
                 }
             )
             sb.to_parquet(data_dir / "stock_basic.parquet")
@@ -50,6 +52,7 @@ class TestBuildUniverse:
                     "ts_code": ["000001.SZ", "000002.SZ"],
                     "market": ["主板", "主板"],
                     "list_status": ["L", "L"],
+                    "industry": ["银行", "证券"],
                 }
             )
             sb.to_parquet(data_dir / "stock_basic.parquet")

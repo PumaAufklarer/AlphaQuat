@@ -10,7 +10,7 @@ from alpha_quat.backtest.portfolio import Portfolio
 from alpha_quat.backtest.metrics import compute_metrics
 from alpha_quat.strategy.types import SignalResult, StrategyContext
 from alpha_quat.strategy.signals.ma_cross import MACrossSignal
-from alpha_quat.strategy.signals.ml_signal import MLSignalGenerator
+from alpha_quat.model.constants import date_to_path
 from alpha_quat.strategy.positions.equal_weight import EqualWeightTopKPosition
 
 logger = logging.getLogger(__name__)
@@ -18,12 +18,8 @@ logger = logging.getLogger(__name__)
 _CLOSE_HISTORY_WINDOW = 30  # trading days for vol computation
 
 
-def _ymd_to_path(ymd: str) -> str:
-    return f"{ymd[:4]}_{ymd[4:6]}_{ymd[6:8]}"
-
-
 class BacktestEngine:
-    def __init__(self, config: BacktestConfig, data_dir: Path):
+    def __init__(self, config: BacktestConfig, data_dir: Path) -> None:
         self.config = config
         self.data_dir = data_dir
         self.portfolio = Portfolio(cash=config.initial_capital)
@@ -38,8 +34,12 @@ class BacktestEngine:
                 raise ValueError(f"Unknown signal mode: {exp_cfg.mode}")
             self.signal_gen = SigVARIANTS[exp_cfg.mode](exp_dir)
         elif config.model_dir:
-            self.signal_gen = MLSignalGenerator(
-                Path(config.model_dir), top_k=config.top_k
+            logger.warning(
+                "--model-dir is deprecated (use --experiment instead). "
+                "Falling back to MA cross signal."
+            )
+            self.signal_gen = MACrossSignal(
+                short_factor=config.short_factor, long_factor=config.long_factor
             )
         else:
             self.signal_gen = MACrossSignal(
@@ -84,7 +84,7 @@ class BacktestEngine:
 
         tracked_months: set[str] = set()
 
-        if not self.config.model_dir:
+        if isinstance(self.signal_gen, MACrossSignal):
             self.signal_gen._prev = None  # type: ignore[attr-defined]
 
         self._pending_signals = None
@@ -101,7 +101,7 @@ class BacktestEngine:
                         self._additions.get(td, 0) + self.config.monthly_addition
                     )
 
-            daily_path = self.data_dir / "daily" / f"{_ymd_to_path(td)}.parquet"
+            daily_path = self.data_dir / "daily" / f"{date_to_path(td)}.parquet"
             if not daily_path.exists():
                 logger.warning("No daily data for %s, skipping", td)
                 continue
@@ -223,7 +223,7 @@ class BacktestEngine:
                 features["ret_back_5"] = ret5
                 features["ret_back_20"] = ret20
 
-            if self.config.model_dir or self.config.experiment_name:
+            if self.config.experiment_name:
                 if self.config.daily_monitor:
                     ctx_sig = StrategyContext(
                         trade_date=td, capital=self.portfolio.total_value(close_px)

@@ -36,7 +36,11 @@ class TestComputeMetrics:
         assert result["max_drawdown_date"] == "d4"
 
     def test_win_rate(self):
-        trades = [{"pnl": 100.0}, {"pnl": -50.0}, {"pnl": 200.0}]
+        trades = [
+            {"action": "sell", "ts_code": "000001.SZ", "buy_date": "d0", "pnl": 100.0},
+            {"action": "sell", "ts_code": "000002.SZ", "buy_date": "d0", "pnl": -50.0},
+            {"action": "sell", "ts_code": "000003.SZ", "buy_date": "d0", "pnl": 200.0},
+        ]
         result = compute_metrics(
             [{"date": "d1", "cash": 0, "market_value": 100, "total_value": 100}],
             trades,

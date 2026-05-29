@@ -6,7 +6,7 @@ from alpha_quat.strategy.position import IPositionManager
 
 
 class Strategy:
-    def __init__(self, signal: ISignalGenerator, position: IPositionManager):
+    def __init__(self, signal: ISignalGenerator, position: IPositionManager) -> None:
         self.signal = signal
         self.position = position
 

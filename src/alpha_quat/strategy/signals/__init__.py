@@ -15,3 +15,9 @@ def create_signal_from_experiment(
     if cls is None:
         raise ValueError(f"Unknown signal mode: {exp_cfg.mode}")
     return cls(exp_dir)
+
+
+__all__ = [
+    "create_signal_from_experiment",
+    "ISignalGenerator",
+]
