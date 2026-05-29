@@ -4,7 +4,7 @@ import math
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model: int, max_len: int = 5000) -> None:
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -32,7 +32,7 @@ class StockTransformer(nn.Module):
         dim_feed: int = 512,
         dropout: float = 0.1,
         n_bins: int = 101,
-    ):
+    ) -> None:
         super().__init__()
         self.input_proj = nn.Linear(n_features, d_model)
         self.pos_encoder = PositionalEncoding(d_model)

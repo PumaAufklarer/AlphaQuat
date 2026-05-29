@@ -33,7 +33,7 @@ def _validate(model, val_loader):
 
 
 class _WarmupCosineScheduler:
-    def __init__(self, optimizer, warmup_steps, total_steps):
+    def __init__(self, optimizer, warmup_steps, total_steps) -> None:
         self.optimizer = optimizer
         self.warmup_steps = warmup_steps
         self.total_steps = total_steps

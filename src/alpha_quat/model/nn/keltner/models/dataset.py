@@ -136,7 +136,7 @@ def _build_sequences(
 
 
 class KeltnerRegimeDataset(Dataset):
-    def __init__(self, X: np.ndarray, Y: np.ndarray):
+    def __init__(self, X: np.ndarray, Y: np.ndarray) -> None:
         self.X = torch.from_numpy(X).float()
         self.Y = torch.from_numpy(Y).long()
 

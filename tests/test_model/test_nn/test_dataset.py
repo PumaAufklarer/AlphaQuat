@@ -27,6 +27,14 @@ def _make_synthetic_alpha360(n_stocks=2, n_days=100):
                     "close": price,
                     "volume": rng.randint(100000, 1000000),
                     "vwap": price * (1 + rng.randn() * 0.003),
+                    "volume_ratio": 1.0 + rng.randn() * 0.05,
+                    "turnover_rate": abs(rng.randn()) * 0.5,
+                    "hl_ratio": 0.02 + abs(rng.randn()) * 0.005,
+                    "ret_5d": rng.randn() * 0.02,
+                    "close_ma20": rng.randn() * 0.02,
+                    "atr_ratio": 0.03 + abs(rng.randn()) * 0.005,
+                    "vol_change": rng.randn() * 0.1,
+                    "amt_change": rng.randn() * 0.1,
                     "resistance_5d_price": price * 1.05 if d < n_days - 5 else np.nan,
                     "resistance_20d_price": price * 1.10 if d < n_days - 20 else np.nan,
                     "resistance_60d_price": price * 1.20 if d < n_days - 60 else np.nan,
@@ -76,7 +84,7 @@ def test_build_sequences_shape():
     )
     assert X.ndim == 3
     assert X.shape[1] == 20
-    assert X.shape[2] == 6
+    assert X.shape[2] == 14
     assert Y.ndim == 2
     assert Y.shape[1] == 6
     assert Y.dtype == np.int64

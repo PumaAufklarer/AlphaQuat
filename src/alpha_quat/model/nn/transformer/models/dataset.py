@@ -154,7 +154,7 @@ def _build_sequences(
 
 
 class SRSequenceDataset(Dataset):
-    def __init__(self, X: np.ndarray, Y: np.ndarray, weight: np.ndarray):
+    def __init__(self, X: np.ndarray, Y: np.ndarray, weight: np.ndarray) -> None:
         self.X = torch.from_numpy(X).float()
         self.Y = torch.from_numpy(Y).long()
         self.weight = torch.from_numpy(weight).float()

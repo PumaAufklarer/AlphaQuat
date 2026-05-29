@@ -59,7 +59,7 @@ def _normalize_market(x: np.ndarray) -> np.ndarray:
 
 
 class RankScorer(nn.Module):
-    def __init__(self, n_features=14, d_model=128, **kwargs):
+    def __init__(self, n_features=14, d_model=128, **kwargs) -> None:
         super().__init__()
         self.encoder = DirectionEncoder(
             n_features=n_features, d_model=d_model, **kwargs

@@ -115,7 +115,7 @@ def grid_search(data_dir: Path, config: ExperimentConfig):
                 metrics.get("avg_entropy", float("nan")),
             )
         except Exception as e:
-            logger.error("Trial failed: %s", e)
+            logger.exception("Trial failed")
             results.append(
                 {
                     "params": {"lr": lr, "d_model": d_model, "dropout": dropout},
@@ -124,12 +124,13 @@ def grid_search(data_dir: Path, config: ExperimentConfig):
             )
 
     # Summary table
-    print()
-    print("=" * 80)
-    print("  GRID SEARCH RESULTS (sorted by val_loss)")
-    print("=" * 80)
-    print(f"  {'Params':<30} {'val_loss':<10} {'top3_acc':<10} {'entropy':<10}")
-    print("  " + "-" * 60)
+    logger.info("=" * 80)
+    logger.info("  GRID SEARCH RESULTS (sorted by val_loss)")
+    logger.info("=" * 80)
+    logger.info(
+        "  %-30s %-10s %-10s %-10s", "Params", "val_loss", "top3_acc", "entropy"
+    )
+    logger.info("  " + "-" * 60)
 
     sorted_results = sorted(
         [r for r in results if "avg_loss" in r],
@@ -153,9 +154,7 @@ def grid_search(data_dir: Path, config: ExperimentConfig):
             ]
         )
         ent = r.get("avg_entropy", float("nan"))
-        print(f"  {label:<30} {avg_loss:<10.4f} {top3:<10.3f} {ent:<10.4f}")
-
-    print()
+        logger.info("  %-30s %-10.4f %-10.3f %-10.4f", label, avg_loss, top3, ent)
 
     # Save results
     out_path = data_dir / "models" / "experiments" / config.name / "grid_results.json"

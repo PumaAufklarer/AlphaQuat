@@ -32,7 +32,7 @@ _FEATURE_COLS = [
 class SRInference:
     """Load a trained SR Transformer and run inference."""
 
-    def __init__(self, model_dir: Path):
+    def __init__(self, model_dir: Path) -> None:
         with open(model_dir / "transformer_config.json") as f:
             cfg_dict = json.load(f)
         self.config = TransformerConfig(**cfg_dict)

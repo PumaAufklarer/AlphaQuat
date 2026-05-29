@@ -41,7 +41,7 @@ class DirectionEncoder(nn.Module):
         n_layers: int = 4,
         dim_feed: int = 512,
         dropout: float = 0.1,
-    ):
+    ) -> None:
         super().__init__()
         self.input_proj = nn.Linear(n_features, d_model)
         self.pos_encoder = _PositionalEncoding(d_model)
@@ -60,7 +60,7 @@ class DirectionEncoder(nn.Module):
 
 
 class _PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model: int, max_len: int = 5000) -> None:
         super().__init__()
         import math
 
@@ -81,7 +81,7 @@ class _PositionalEncoding(nn.Module):
 class DirectionClassifier(nn.Module):
     """Full pre-training model: encoder + classification head."""
 
-    def __init__(self, n_features: int = 14, d_model: int = 128, **kwargs):
+    def __init__(self, n_features: int = 14, d_model: int = 128, **kwargs) -> None:
         super().__init__()
         self.encoder = DirectionEncoder(
             n_features=n_features, d_model=d_model, **kwargs
@@ -98,7 +98,7 @@ class DirectionClassifier(nn.Module):
 
 
 class _LRDataset(Dataset):
-    def __init__(self, X, Y):
+    def __init__(self, X, Y) -> None:
         self.X = torch.from_numpy(X).float()
         self.Y = torch.from_numpy(Y).long()
 

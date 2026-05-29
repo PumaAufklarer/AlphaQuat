@@ -20,7 +20,7 @@ _SEQ_LEN = 60
 class PositionAgentInference:
     """Load a trained PositionAgent and run daily inference."""
 
-    def __init__(self, model_dir: Path):
+    def __init__(self, model_dir: Path) -> None:
         with open(model_dir / "agent_config.json") as f:
             cfg = json.load(f)
         self.seq_length = cfg.get("seq_length", 60)

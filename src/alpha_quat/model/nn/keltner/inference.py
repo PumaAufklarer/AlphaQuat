@@ -22,7 +22,7 @@ _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class KeltnerInference:
     """Load a trained KeltnerRegimeTransformer and run inference."""
 
-    def __init__(self, model_dir: Path):
+    def __init__(self, model_dir: Path) -> None:
         with open(model_dir / "keltner_config.json") as f:
             cfg = json.load(f)
         self.n_features = cfg["n_features"]

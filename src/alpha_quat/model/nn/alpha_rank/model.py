@@ -4,7 +4,7 @@ import torch.nn as nn
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
+    def __init__(self, d_model, max_len=5000) -> None:
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         pos = torch.arange(0, max_len).float().unsqueeze(1)
@@ -22,7 +22,7 @@ class PositionalEncoding(nn.Module):
 class RankScoreTransformer(nn.Module):
     def __init__(
         self, n_features=21, d_model=128, nhead=4, n_layers=4, dim_feed=512, dropout=0.1
-    ):
+    ) -> None:
         super().__init__()
         self.input_proj = nn.Linear(n_features, d_model)
         self.pos_enc = PositionalEncoding(d_model)

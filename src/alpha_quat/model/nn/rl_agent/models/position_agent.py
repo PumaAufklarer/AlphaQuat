@@ -6,7 +6,7 @@ from alpha_quat.model.nn.rl_agent.pretrain import DirectionEncoder
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model: int, max_len: int = 5000) -> None:
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -37,7 +37,7 @@ class PositionAgent(nn.Module):
         n_layers: int = 4,
         dim_feed: int = 512,
         dropout: float = 0.1,
-    ):
+    ) -> None:
         super().__init__()
         n_input = n_market_features + 2
         self.input_proj = nn.Linear(n_input, d_model)

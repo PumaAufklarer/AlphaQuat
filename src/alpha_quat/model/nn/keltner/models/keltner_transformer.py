@@ -4,7 +4,7 @@ import math
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model: int, max_len: int = 5000) -> None:
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -33,7 +33,7 @@ class KeltnerRegimeTransformer(nn.Module):
         dropout: float = 0.1,
         n_heads: int = 3,
         n_regimes: int = 5,
-    ):
+    ) -> None:
         super().__init__()
         self.n_heads = n_heads
         self.n_regimes = n_regimes
