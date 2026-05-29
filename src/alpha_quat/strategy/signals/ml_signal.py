@@ -13,6 +13,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from alpha_quat.model.constants import ZERO_GAIN_FEATURES
 from alpha_quat.strategy.signal import ISignalGenerator
 from alpha_quat.strategy.types import SignalResult, StrategyContext
 
@@ -21,42 +22,10 @@ logger = logging.getLogger(__name__)
 _WEIGHTS = {"5d": 0.35, "20d": 0.32, "60d": 0.33}
 _HORIZONS = ["5d", "20d", "60d"]
 _ALPHAS = [0.1, 0.5, 0.9]
-_ZERO_GAIN = {
-    "KMID94",
-    "KMID95",
-    "KMID96",
-    "KLEN94",
-    "KLEN95",
-    "KLEN96",
-    "KMID97",
-    "KLEN97",
-    "KMID98",
-    "KLEN98",
-    "KMID99",
-    "KLEN99",
-    "KMID100",
-    "KLEN100",
-    "KMID101",
-    "O2C",
-    "DRP",
-    "HLC",
-    "pe_ttm",
-    "pb",
-    "ROE_RAW",
-    "ROE",
-    "MV",
-    "VOLRATIO",
-    "EMA12C",
-    "EMA26C",
-    "MACD",
-    "RSI14",
-    "SLOPE5",
-    "SLOPE20",
-}
 
 
 class MLSignalGenerator(ISignalGenerator):
-    def __init__(self, model_dir: Path, top_k: int = 5):
+    def __init__(self, model_dir: Path, top_k: int = 5) -> None:
         self.top_k = top_k
         self.model_dir = Path(model_dir)
         self.models: dict[str, lgb.Booster] = {}
@@ -154,7 +123,7 @@ class MLSignalGenerator(ISignalGenerator):
         factor_cols = [
             c
             for c in features.columns
-            if c not in ("ts_code", "trade_date") and c not in _ZERO_GAIN
+            if c not in ("ts_code", "trade_date") and c not in ZERO_GAIN_FEATURES
         ]
         X = features[factor_cols].fillna(0)
 

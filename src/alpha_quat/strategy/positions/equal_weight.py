@@ -1,11 +1,10 @@
 import pandas as pd
+from alpha_quat.model.constants import LOT_SIZE
 from alpha_quat.strategy.position import IPositionManager
-
-LOT_SIZE = 100
 
 
 class EqualWeightTopKPosition(IPositionManager):
-    def __init__(self, top_k=5):
+    def __init__(self, top_k=5) -> None:
         self.top_k = top_k
 
     def allocate(self, signals, ctx):

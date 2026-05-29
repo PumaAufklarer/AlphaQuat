@@ -2,9 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-
-def _date_to_path(yyyymmdd: str) -> str:
-    return f"{yyyymmdd[:4]}_{yyyymmdd[4:6]}_{yyyymmdd[6:8]}"
+from alpha_quat.model.constants import date_to_path
 
 
 def _get_industry_map(data_dir: Path) -> dict[str, str]:
@@ -29,7 +27,7 @@ def build_universe(
     main_board = set(sb.loc[sb["market"] == "主板", "ts_code"])
 
     # Remove ST stocks
-    st_path = data_dir / "stock_st" / f"{_date_to_path(trade_date)}.parquet"
+    st_path = data_dir / "stock_st" / f"{date_to_path(trade_date)}.parquet"
     if st_path.exists():
         st = pd.read_parquet(st_path)
         main_board -= set(st["ts_code"])
@@ -37,7 +35,7 @@ def build_universe(
     universe = main_board
 
     if min_price > 0:
-        daily_path = data_dir / "daily" / f"{_date_to_path(trade_date)}.parquet"
+        daily_path = data_dir / "daily" / f"{date_to_path(trade_date)}.parquet"
         if daily_path.exists():
             daily = pd.read_parquet(daily_path)
             high_price_stocks = set(daily.loc[daily["high"] >= min_price, "ts_code"])
@@ -47,7 +45,7 @@ def build_universe(
         return universe
 
     # Quality filter: industry-relative PE/PB + market cap + liquidity
-    db_path = data_dir / "daily_basic" / f"{_date_to_path(trade_date)}.parquet"
+    db_path = data_dir / "daily_basic" / f"{date_to_path(trade_date)}.parquet"
     if not db_path.exists():
         return main_board
 

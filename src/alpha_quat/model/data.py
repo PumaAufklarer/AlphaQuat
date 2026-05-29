@@ -6,27 +6,9 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from alpha_quat.model.constants import ZERO_GAIN_FEATURES
 
 logger = logging.getLogger(__name__)
-
-# Redundant high-index KLEN/KMID variants — zero-gain from previous experiments
-_ZERO_GAIN_FEATURES = {
-    "KMID94",
-    "KMID95",
-    "KMID96",
-    "KLEN94",
-    "KLEN95",
-    "KLEN96",
-    "KMID97",
-    "KLEN97",
-    "KMID98",
-    "KLEN98",
-    "KMID99",
-    "KLEN99",
-    "KMID100",
-    "KLEN100",
-    "KMID101",
-}
 
 
 @dataclass
@@ -48,7 +30,7 @@ class DatasetResult:
 
 
 class DatasetBuilder:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path) -> None:
         self.data_dir = Path(data_dir)
 
     def _get_trade_dates(self) -> pd.Series:
@@ -122,7 +104,7 @@ class DatasetBuilder:
         if feature_names is not None:
             factor_cols = [c for c in all_factor_cols if c in feature_names]
         else:
-            factor_cols = [c for c in all_factor_cols if c not in _ZERO_GAIN_FEATURES]
+            factor_cols = [c for c in all_factor_cols if c not in ZERO_GAIN_FEATURES]
 
         factor_select = ", ".join(f'"{c}"' for c in factor_cols)
         factor_notnull = " AND ".join(f'"{c}" IS NOT NULL' for c in factor_cols)

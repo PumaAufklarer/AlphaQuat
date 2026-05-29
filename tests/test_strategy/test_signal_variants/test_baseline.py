@@ -1,6 +1,7 @@
 import pytest
 
-from alpha_quat.strategy.signals.variants.baseline import BaseMLSignal, _ZERO_GAIN
+from alpha_quat.model.constants import ZERO_GAIN_FEATURES
+from alpha_quat.strategy.signals.variants.baseline import BaseMLSignal
 from alpha_quat.strategy.signals.variants import VARIANTS
 
 
@@ -16,4 +17,4 @@ def test_register():
 
 
 def test_zero_gain_is_set():
-    assert len(_ZERO_GAIN) == 30
+    assert len(ZERO_GAIN_FEATURES) == 30

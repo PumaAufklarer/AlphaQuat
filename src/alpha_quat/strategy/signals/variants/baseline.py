@@ -1,28 +1,10 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
+from alpha_quat.model.constants import ZERO_GAIN_FEATURES
 from alpha_quat.strategy.types import SignalResult, StrategyContext
-
-_ZERO_GAIN = {
-    "KMID94",
-    "KMID95",
-    "KMID96",
-    "KLEN94",
-    "KLEN95",
-    "KLEN96",
-    "KMID97",
-    "KLEN97",
-    "KMID98",
-    "KLEN98",
-    "KMID99",
-    "KLEN99",
-    "KMID100",
-    "KLEN100",
-    "KMID101",
-}
 
 _IND_FACTORS = ["PE_TTM", "PB", "MV", "TURN", "ROE"]
 _INDUSTRY_MAP: dict[str, str] | None = None
@@ -43,7 +25,7 @@ class BaseMLSignal(ABC):
     mode: str
     _WEIGHTS = {"5d": 0.35, "20d": 0.32, "60d": 0.33}
 
-    def __init__(self, model_dir: str | Path):
+    def __init__(self, model_dir: str | Path) -> None:
         self.model_dir = Path(model_dir)
         self.models = self._load_models(self.model_dir)
 
@@ -61,7 +43,7 @@ class BaseMLSignal(ABC):
         factor_cols = [
             c
             for c in features.columns
-            if c not in ("ts_code", "trade_date") and c not in _ZERO_GAIN
+            if c not in ("ts_code", "trade_date") and c not in ZERO_GAIN_FEATURES
         ]
         result = features[factor_cols].copy()
 
@@ -127,5 +109,6 @@ class BaseMLSignal(ABC):
                 [features, pd.DataFrame({"ts_code": ["__RFR__"]})], ignore_index=True
             )
 
-        assert isinstance(result, pd.DataFrame)
+        if not isinstance(result, pd.DataFrame):
+            raise RuntimeError("generate() must return a pandas DataFrame")
         return result, features

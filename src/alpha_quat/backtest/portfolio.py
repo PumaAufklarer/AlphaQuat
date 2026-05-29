@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-LOT_SIZE = 100
+from alpha_quat.model.constants import LOT_SIZE
 
 
 @dataclass
@@ -14,7 +14,7 @@ class Holding:
 
 
 class Portfolio:
-    def __init__(self, cash: float = 0.0):
+    def __init__(self, cash: float = 0.0) -> None:
         self.cash = cash
         self.holdings: dict[str, Holding] = {}
         self.snapshots: list[dict] = []
