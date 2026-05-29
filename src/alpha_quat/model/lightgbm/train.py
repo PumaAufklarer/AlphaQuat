@@ -7,7 +7,6 @@ import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
 
 from alpha_quat.experiment.config import ExperimentConfig
-from alpha_quat.model.lightgbm.config import LightGBMConfig
 
 logger = logging.getLogger(__name__)
 
@@ -18,28 +17,8 @@ def pinball_loss(y_true: np.ndarray, y_pred: np.ndarray, alpha: float) -> float:
 
 
 class LightGBMTrainer:
-    def __init__(self, config: LightGBMConfig):
+    def __init__(self, config: ExperimentConfig) -> None:
         self.config = config
-
-    @classmethod
-    def from_config(cls, config: ExperimentConfig) -> "LightGBMTrainer":
-        lgb_cfg = LightGBMConfig(
-            num_leaves=config.num_leaves,
-            learning_rate=config.learning_rate,
-            n_estimators=config.n_estimators,
-            feature_fraction=config.feature_fraction,
-            bagging_fraction=config.bagging_fraction,
-            early_stopping_rounds=config.early_stopping_rounds,
-            random_state=config.random_state,
-            n_jobs=config.n_jobs,
-            verbosity=config.verbosity,
-            n_trials=config.n_trials,
-            tune=config.tune,
-            feature_names=config.feature_names,
-            n_tile=config.n_tile,
-            label_gain=config.label_gain,
-        )
-        return cls(lgb_cfg)
 
     def _base_params(
         self, quantile_alpha: float | None = None, lambdarank: bool = False

@@ -11,7 +11,7 @@ class QuantilePipeline(LightGBMBasePipeline):
     mode = "quantile"
 
     def _train(self, data, config: ExperimentConfig) -> dict[str, lgb.Booster]:
-        trainer = LightGBMTrainer.from_config(config)
+        trainer = LightGBMTrainer(config)
         X = data.X_train
         alphas = config.quantile_alphas or [0.1, 0.5, 0.9]
         models = {}

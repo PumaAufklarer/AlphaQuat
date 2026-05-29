@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from alpha_quat.model.lightgbm.config import LightGBMConfig
+from alpha_quat.experiment.config import ExperimentConfig
 from alpha_quat.model.lightgbm.train import LightGBMTrainer
 
 RNG = np.random.RandomState(42)
@@ -9,7 +9,13 @@ RNG = np.random.RandomState(42)
 
 class TestLightGBMTrainer:
     def test_train_without_tune(self):
-        cfg = LightGBMConfig(tune=False, n_estimators=10, num_leaves=5)
+        cfg = ExperimentConfig(
+            name="test_train",
+            mode="regression",
+            tune=False,
+            n_estimators=10,
+            num_leaves=5,
+        )
         trainer = LightGBMTrainer(cfg)
 
         n_samples = 200
@@ -29,7 +35,14 @@ class TestLightGBMTrainer:
         assert model.params["objective"] == "regression"
 
     def test_train_with_tune_small_search(self):
-        cfg = LightGBMConfig(tune=True, n_trials=3, n_estimators=10, num_leaves=5)
+        cfg = ExperimentConfig(
+            name="test_train_tune",
+            mode="regression",
+            tune=True,
+            n_trials=3,
+            n_estimators=10,
+            num_leaves=5,
+        )
         trainer = LightGBMTrainer(cfg)
 
         n_samples = 200

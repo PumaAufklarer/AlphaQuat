@@ -1,9 +1,9 @@
-from alpha_quat.model.lightgbm.config import LightGBMConfig
+from alpha_quat.experiment.config import ExperimentConfig
 
 
-class TestLightGBMConfig:
+class TestExperimentConfigDefaults:
     def test_default_values(self):
-        cfg = LightGBMConfig()
+        cfg = ExperimentConfig(name="test", mode="regression")
         assert cfg.num_leaves == 31
         assert cfg.learning_rate == 0.05
         assert cfg.n_estimators == 200
@@ -16,9 +16,13 @@ class TestLightGBMConfig:
         assert cfg.n_trials == 50
         assert cfg.tune is True
         assert cfg.feature_names is None
+        assert cfg.n_tile == 10
+        assert cfg.label_gain is None
 
     def test_custom_values(self):
-        cfg = LightGBMConfig(
+        cfg = ExperimentConfig(
+            name="test_custom",
+            mode="regression",
             num_leaves=63,
             learning_rate=0.1,
             n_trials=100,

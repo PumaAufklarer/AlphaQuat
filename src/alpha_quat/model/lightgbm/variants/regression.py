@@ -11,7 +11,7 @@ class RegressionPipeline(LightGBMBasePipeline):
     mode = "regression"
 
     def _train(self, data, config: ExperimentConfig) -> dict[str, lgb.Booster]:
-        trainer = LightGBMTrainer.from_config(config)
+        trainer = LightGBMTrainer(config)
         X = data.X_train
         models = {}
         for h_name, h in [("5d", 5), ("20d", 20), ("60d", 60)]:
