@@ -19,7 +19,7 @@ from alpha_quat.features.factor import (
 
 
 class FeatureEngine:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
         self.conn = duckdb.connect()
 

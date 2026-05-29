@@ -59,6 +59,7 @@ def test_process_one_stock_column_names():
             "low": base * (1 - abs(rng.randn(n)) * 0.01 - 0.01),
             "close": base,
             "volume": rng.randint(100000, 1000000, n),
+            "amount": rng.randint(1000000, 10000000, n),
             "vwap": base,
         }
     )

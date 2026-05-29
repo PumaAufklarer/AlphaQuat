@@ -18,7 +18,7 @@ class Pipeline:
         fetcher,
         metadata,
         writer,
-    ):
+    ) -> None:
         self.data_dir = data_dir
         self.fetcher = fetcher
         self.metadata = metadata
@@ -34,9 +34,9 @@ class Pipeline:
                 try:
                     self.run_full_source(source)
                     results["full"]["success"] += 1
-                except Exception as e:
+                except Exception:
                     results["full"]["failed"] += 1
-                    logger.error(f"[{source.api_name}] full source failed: {e}")
+                    logger.exception("[%s] full source failed", source.api_name)
             else:
                 result = self.run_incremental_source(source)
                 if result.get("message"):
@@ -59,7 +59,7 @@ class Pipeline:
             file_path=str(path),
             row_count=len(df),
         )
-        logger.info(f"[{source.api_name}] pulled {len(df)} rows -> {path}")
+        logger.info("[%s] pulled %d rows -> %s", source.api_name, len(df), path)
 
     def run_incremental_source(self, source: DataSource) -> dict:
         trade_cal_path = self.data_dir / "trade_cal.parquet"
@@ -108,10 +108,10 @@ class Pipeline:
                     row_count=len(df),
                 )
                 success += 1
-                logger.info(f"[{source.api_name}] {trade_date}: {len(df)} rows")
+                logger.info("[%s] %s: %d rows", source.api_name, trade_date, len(df))
             except Exception as e:
                 failed += 1
                 errors.append(f"[{source.api_name}] {trade_date}: {e}")
-                logger.error(f"[{source.api_name}] {trade_date}: {e}")
+                logger.exception("[%s] %s failed", source.api_name, trade_date)
 
         return {"success": success, "failed": failed, "errors": errors}

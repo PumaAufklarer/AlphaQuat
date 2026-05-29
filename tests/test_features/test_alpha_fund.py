@@ -6,7 +6,7 @@ class TestAlphaFund:
     def test_all_factors_registered(self):
         reg = build_alpha_fund()
         assert reg.name == "alpha_fund"
-        assert len(reg.factors) == 7
+        assert len(reg.factors) == 8
 
     def test_all_factors_compile(self):
         from alpha_quat.features.factor import compile

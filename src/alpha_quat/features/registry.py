@@ -7,7 +7,7 @@ from alpha_quat.features.factor import Factor
 
 
 class FactorRegistry:
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name = name
         self.factors: dict[str, Factor] = {}
 

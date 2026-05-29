@@ -6,7 +6,7 @@ import duckdb
 
 
 class MetadataManager:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str) -> None:
         self.conn = duckdb.connect(db_path)
         self._init_table()
 

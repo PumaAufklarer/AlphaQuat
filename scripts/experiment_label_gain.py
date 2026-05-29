@@ -4,6 +4,8 @@
 Usage: uv run python3 scripts/experiment_label_gain.py
 """
 
+# ruff: noqa: E402
+
 import json
 import logging
 import sys

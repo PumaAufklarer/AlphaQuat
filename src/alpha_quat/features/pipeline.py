@@ -13,7 +13,7 @@ BATCH_SIZE = 20  # trading dates per DuckDB query
 
 
 class FeaturePipeline:
-    def __init__(self, data_dir, output_dir, engine, writer, metadata):
+    def __init__(self, data_dir, output_dir, engine, writer, metadata) -> None:
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.engine = engine
@@ -87,7 +87,7 @@ class FeaturePipeline:
                     )
                     results["success"] += 1
             except Exception as e:
-                logger.error("Batch failed: %s", e)
+                logger.exception("Batch failed")
                 results["failed"] += len(batch)
                 results["errors"].append(str(e))
 

@@ -14,7 +14,7 @@ def _make_synthetic_data(data_dir: Path):
     ts_codes = ["000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ", "000005.SZ"]
 
     train_dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
-    val_dates = ["20240109", "20240110", "20240111"]
+    val_dates = ["20240109", "20240110", "20240111", "20240116", "20240117", "20240118"]
     # 70 trading days margin for max_offset=60 forward labels
     margin_dates = [
         f"2024{m:02d}{d:02d}"
@@ -126,6 +126,7 @@ def _make_synthetic_data(data_dir: Path):
             "ts_code": ts_codes,
             "market": ["主板"] * len(ts_codes),
             "list_status": ["L"] * len(ts_codes),
+            "industry": ["银行"] * len(ts_codes),
         }
     )
     sb.to_parquet(data_dir / "stock_basic.parquet")
@@ -153,7 +154,7 @@ class TestLightGBMPipeline:
                 train_start="20240102",
                 train_end="20240108",
                 val_start="20240109",
-                val_end="20240111",
+                val_end="20240118",
                 tune=False,
                 n_estimators=10,
                 num_leaves=5,

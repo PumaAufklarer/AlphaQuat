@@ -15,7 +15,7 @@ class Fetcher:
         token: str,
         max_retries: int = 12,
         retry_delay: float = 5.0,
-    ):
+    ) -> None:
         if max_retries < 1:
             raise ValueError("max_retries must be >= 1")
         self.max_retries = max_retries

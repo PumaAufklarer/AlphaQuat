@@ -9,7 +9,7 @@ class Config:
     token: str
     data_dir: Path
 
-    def __init__(self, token: str, data_dir: Path | str = "data"):
+    def __init__(self, token: str, data_dir: Path | str = "data") -> None:
         self.token = token
         self.data_dir = Path(data_dir)
 

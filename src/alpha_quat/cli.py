@@ -216,7 +216,12 @@ def _cmd_predict(args, config):
         logger.info("Using experiment: %s", args.experiment)
 
     # Predict
-    run_predict(config.data_dir, holdings=holdings, top_k=args.top_k)
+    run_predict(
+        config.data_dir,
+        holdings=holdings,
+        top_k=args.top_k,
+        experiment_name=args.experiment,
+    )
 
 
 def _cmd_feature(args, config, metadata):
@@ -252,8 +257,6 @@ def _cmd_feature(args, config, metadata):
 
 
 def _cmd_backtest(args, config):
-    model_dir = args.model_dir or config.data_dir / "models"
-
     cfg = BacktestConfig(
         start_date=args.start,
         end_date=args.end,
@@ -262,7 +265,7 @@ def _cmd_backtest(args, config):
         commission_rate=args.commission,
         stop_loss_pct=args.stop_loss,
         top_k=args.top_k,
-        model_dir=str(model_dir) if args.model_dir or model_dir.exists() else None,
+        model_dir=str(args.model_dir) if args.model_dir else None,
         experiment_name=args.experiment,
         rebalance_interval=args.rebalance_interval,
         sell_threshold=args.sell_threshold,

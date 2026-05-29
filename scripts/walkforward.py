@@ -7,11 +7,13 @@ Windows slide every 6 months.
 Usage: uv run python3 scripts/walkforward.py
 """
 
+# ruff: noqa: E402
+
 import json
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -180,14 +182,14 @@ def main():
         pos = sum(1 for s in sharpes if s > 0)
         print(f"\n  Mean Sharpe: {mu:.3f} ± {std:.3f}  Positive: {pos}/{len(sharpes)}")
         print(
-            f"  → Safe for live trading"
+            "  → Safe for live trading"
             if mu > 1.0 and pos == len(sharpes)
-            else f"  → Needs more work"
+            else "  → Needs more work"
         )
 
     with open("walkforward_results.json", "w") as f:
         json.dump(all_results, f, indent=2, ensure_ascii=False, default=str)
-    print(f"\nSaved: walkforward_results.json")
+    print("\nSaved: walkforward_results.json")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from alpha_quat.backtest.filters import _date_to_path
+from alpha_quat.model.constants import date_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +19,50 @@ _WEIGHTS = {"5d": 0.35, "20d": 0.32, "60d": 0.33}
 _ALPHAS = [0.1, 0.5, 0.9]
 
 
-def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10):
-    """Score all stocks and print recommendations."""
-    model_dir = data_dir / "models"
+def _load_models_from_experiment(exp_dir: Path) -> tuple[dict, bool]:
+    """Load models from an experiment directory. Returns (models, is_quantile)."""
+    from alpha_quat.experiment.config import ExperimentConfig
 
-    # Detect mode: quantile models or regression mode
+    yaml_path = exp_dir / "experiment.yaml"
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"Experiment config not found: {yaml_path}")
+
+    config = ExperimentConfig.load(yaml_path)
+    mode = config.mode
+
+    if mode in ("regression", "lambdarank"):
+        models: dict = {}
+        for h in ["5d", "20d", "60d"]:
+            path = exp_dir / f"lightgbm_model_{h}.txt"
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Model file not found in experiment '{config.name}': {path}"
+                )
+            models[h] = lgb.Booster(model_file=str(path))
+            logger.info("Loaded %s (%s)", h, mode)
+        return models, False
+
+    elif mode == "quantile":
+        alphas = config.quantile_alphas or _ALPHAS
+        models = {}
+        for h in ["5d", "20d", "60d"]:
+            models[h] = {}
+            for a in alphas:
+                path = exp_dir / f"lightgbm_model_{h}_alpha_{a}.txt"
+                if not path.exists():
+                    raise FileNotFoundError(
+                        f"Model file not found in experiment '{config.name}': {path}"
+                    )
+                models[h][a] = lgb.Booster(model_file=str(path))
+                logger.info("Loaded %s alpha=%.1f", h, a)
+        return models, True
+
+    else:
+        raise ValueError(f"Unknown mode '{mode}' in experiment '{config.name}'")
+
+
+def _load_legacy_models(model_dir: Path) -> tuple[dict, bool]:
+    """Load models from legacy model_dir path with auto-detection. Returns (models, is_quantile)."""
     quantile_mode = all(
         (model_dir / f"lightgbm_model_{h}_alpha_0.1.txt").exists()
         for h in ["5d", "20d", "60d"]
@@ -53,7 +92,43 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
                 models[h] = lgb.Booster(model_file=str(path))
                 logger.info("Loaded %s", h)
 
+    return models, quantile_mode
+
+
+def predict(
+    data_dir: Path,
+    holdings: list[dict] | None = None,
+    top_k: int = 10,
+    experiment_name: str | None = None,
+):
+    """Score all stocks and print recommendations.
+
+    Args:
+        data_dir: Root data directory.
+        holdings: Optional list of holding dicts with ts_code/shares/avg_cost.
+        top_k: Number of top/bottom picks to display.
+        experiment_name: If set, load models from
+            ``data_dir/models/experiments/<name>/`` instead of legacy paths.
+    """
+    exp_dir: Path | None = None
+
+    if experiment_name:
+        exp_dir = data_dir / "models" / "experiments" / experiment_name
+        if not exp_dir.exists():
+            raise FileNotFoundError(
+                f"Experiment directory not found: {exp_dir}\n"
+                f"Available experiments: use 'uv run alpha-quat experiment list'"
+            )
+        models, quantile_mode = _load_models_from_experiment(exp_dir)
+    else:
+        model_dir = data_dir / "models"
+        models, quantile_mode = _load_legacy_models(model_dir)
+
     if not models:
+        if experiment_name:
+            raise FileNotFoundError(
+                f"No models could be loaded from experiment '{experiment_name}'"
+            )
         raise FileNotFoundError(f"No models found in {model_dir}")
 
     # Find latest feature date
@@ -72,7 +147,7 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
     main_board = set(sb.loc[sb["market"] == "主板", "ts_code"])
     features = features.loc[features["ts_code"].isin(list(main_board))]
 
-    st_path = data_dir / "stock_st" / f"{_date_to_path(latest)}.parquet"
+    st_path = data_dir / "stock_st" / f"{date_to_path(latest)}.parquet"
     if st_path.exists():
         st_codes = set(pd.read_parquet(st_path)["ts_code"])
         features = features.loc[~features["ts_code"].isin(list(st_codes))]
@@ -115,9 +190,9 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
     name_map = dict(zip(sb["ts_code"], sb.get("name", sb["ts_code"])))
     features["name"] = features["ts_code"].map(name_map)
 
-    print()
-    print(f"===== PREDICT: {latest} =====")
-    print()
+    logger.info("")
+    logger.info("===== PREDICT: %s =====", latest)
+    logger.info("")
 
     # Top-K
     has_ci = quantile_mode
@@ -126,8 +201,8 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
     )
     if has_ci:
         header += f"  {'CI':>6}"
-    print(header)
-    print("-" * (54 if not has_ci else 63))
+    logger.info(header)
+    logger.info("-" * (54 if not has_ci else 63))
     for i in range(min(top_k, len(features))):
         r = features.iloc[i]
         line = (
@@ -137,13 +212,13 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
         if has_ci:
             ci = (r.get("ci5", 0) + r.get("ci20", 0) + r.get("ci60", 0)) / 3
             line += f"  {ci:.3f}"
-        print(line)
+        logger.info(line)
 
     # Bottom-K
-    print()
-    print(f"=== BOTTOM {top_k} ===")
-    print(header)
-    print("-" * (54 if not has_ci else 63))
+    logger.info("")
+    logger.info("=== BOTTOM %d ===", top_k)
+    logger.info(header)
+    logger.info("-" * (54 if not has_ci else 63))
     n = len(features)
     for i in range(min(top_k, n)):
         r = features.iloc[n - 1 - i]
@@ -154,17 +229,17 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
         if has_ci:
             ci = (r.get("ci5", 0) + r.get("ci20", 0) + r.get("ci60", 0)) / 3
             line += f"  {ci:.3f}"
-        print(line)
+        logger.info(line)
 
     # Current holdings
     if holdings:
-        print()
-        print("=== 当前持仓 ===")
+        logger.info("")
+        logger.info("=== 当前持仓 ===")
         ch = f"{'代码':>10} {'名称':>8}   {'评分':>6} {'排名':>6}"
         ci_header = f" {'CI':>6}" if has_ci else ""
         ch += ci_header + f"   {'持仓':>6} {'成本':>8}"
-        print(ch)
-        print("-" * (68 if has_ci else 60))
+        logger.info(ch)
+        logger.info("-" * (68 if has_ci else 60))
         code_to_idx = dict(zip(features["ts_code"], features.index))
         for h in holdings:
             code = h.get("ts_code", "")
@@ -181,22 +256,22 @@ def predict(data_dir: Path, holdings: list[dict] | None = None, top_k: int = 10)
                     ci = (r.get("ci5", 0) + r.get("ci20", 0) + r.get("ci60", 0)) / 3
                     line += f" {ci:.3f}"
                 line += f"   {shares:>6} {cost:>8.2f}"
-                print(line)
+                logger.info(line)
             else:
-                print(f"  {code:>10} {'(不在评分范围内)':<20}")
+                logger.info("  %s %s", code, "(不在评分范围内)")
 
     # Stats
     scores = features["score"]
-    print()
-    print("=== 当日统计 ===")
-    print(f"  {'分位回归' if quantile_mode else '点估计'}模式")
-    print(f"  评分股票数: {len(features)}")
-    print(f"  综合评分均值: {scores.mean():.4f}")
-    print(f"  综合评分中位: {scores.median():.4f}")
-    print(f"  综合评分范围: {scores.min():.4f} ~ {scores.max():.4f}")
+    logger.info("")
+    logger.info("=== 当日统计 ===")
+    logger.info("  %s模式", "分位回归" if quantile_mode else "点估计")
+    logger.info("  评分股票数: %d", len(features))
+    logger.info("  综合评分均值: %.4f", scores.mean())
+    logger.info("  综合评分中位: %.4f", scores.median())
+    logger.info("  综合评分范围: %.4f ~ %.4f", scores.min(), scores.max())
     if has_ci:
         all_cis = []
         for h in ["5d", "20d", "60d"]:
             ci = abs(preds[h][0.9] - preds[h][0.1]) / 2
             all_cis.append(np.mean(ci))
-        print(f"  平均置信区间半宽: {np.mean(all_cis):.4f}")
+        logger.info("  平均置信区间半宽: %.4f", np.mean(all_cis))

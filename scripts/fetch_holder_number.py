@@ -4,6 +4,8 @@
 Usage: uv run python3 scripts/fetch_holder_number.py
 """
 
+# ruff: noqa: E402
+
 import logging
 import sys
 from pathlib import Path

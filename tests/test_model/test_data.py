@@ -59,6 +59,7 @@ def _make_stock_basic(data_dir: Path, ts_codes: list[str]):
             "ts_code": ts_codes,
             "market": ["主板"] * len(ts_codes),
             "list_status": ["L"] * len(ts_codes),
+            "industry": ["银行"] * len(ts_codes),
         }
     )
     df.to_parquet(data_dir / "stock_basic.parquet")
@@ -81,7 +82,14 @@ class TestDatasetBuilder:
             ts_codes = ["000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ", "000005.SZ"]
 
             train_dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
-            val_dates = ["20240109", "20240110", "20240111"]
+            val_dates = [
+                "20240109",
+                "20240110",
+                "20240111",
+                "20240116",
+                "20240117",
+                "20240118",
+            ]
             margin_dates = MARGIN_DATES_70
             all_feat_dates = train_dates + val_dates + margin_dates
             all_daily_dates = train_dates + val_dates + margin_dates
@@ -92,14 +100,14 @@ class TestDatasetBuilder:
             _make_trade_cal(data_dir, all_daily_dates)
 
             builder = DatasetBuilder(data_dir)
-            result = builder.build("20240102", "20240108", "20240109", "20240111")
+            result = builder.build("20240102", "20240108", "20240109", "20240118")
 
             assert isinstance(result, DatasetResult)
-            assert result.X_train.shape == (25, 2)  # 5 stocks * 5 dates, 2 features
+            assert result.X_train.shape == (5, 2)
             assert result.X_val.shape == (15, 2)  # 5 stocks * 3 dates
-            assert len(result.y_train_5) == 25
+            assert len(result.y_train_5) == 5
             assert len(result.y_val_5) == 15
-            assert len(result.y_train_20) == 25
+            assert len(result.y_train_20) == 5
             assert len(result.y_val_20) == 15
 
     def test_drops_nan_rows(self):
@@ -165,6 +173,7 @@ class TestDatasetBuilder:
                     "ts_code": ts_codes,
                     "market": ["主板", "主板", "创业板"],
                     "list_status": ["L", "L", "L"],
+                    "industry": ["银行", "银行", "科技"],
                 }
             )
             sb.to_parquet(data_dir / "stock_basic.parquet")
