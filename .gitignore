@@ -16,6 +16,10 @@ config.yaml
 /data/
 /.coverage
 
-.superpowers/:memory
-:memory
-:memory
+# Misc
+*.log
+.env
+.DS_Store
+.idea/
+.vscode/
+.omo/
