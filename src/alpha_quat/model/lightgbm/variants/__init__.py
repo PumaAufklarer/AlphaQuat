@@ -1,11 +1,10 @@
 from alpha_quat.model.lightgbm.variants.baseline import LightGBMBasePipeline
+from alpha_quat.model.variant_registry import VariantRegistry
 
-VARIANTS: dict[str, type[LightGBMBasePipeline]] = {}
+_REGISTRY = VariantRegistry[LightGBMBasePipeline]("LightGBM")
+VARIANTS = _REGISTRY.as_dict()
 
-
-def register(cls):
-    VARIANTS[cls.mode] = cls
-    return cls
+register = _REGISTRY.register
 
 
 # Import concrete variant submodules to populate VARIANTS via @register

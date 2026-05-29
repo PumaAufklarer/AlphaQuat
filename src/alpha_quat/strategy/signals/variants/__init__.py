@@ -1,11 +1,10 @@
 from alpha_quat.strategy.signals.variants.baseline import BaseMLSignal
+from alpha_quat.model.variant_registry import VariantRegistry
 
-VARIANTS: dict[str, type[BaseMLSignal]] = {}
+_REGISTRY = VariantRegistry[BaseMLSignal]("signal")
+VARIANTS = _REGISTRY.as_dict()
 
-
-def register(cls):
-    VARIANTS[cls.mode] = cls
-    return cls
+register = _REGISTRY.register
 
 
 from alpha_quat.strategy.signals.variants import regression_signal  # noqa: F401, E402
